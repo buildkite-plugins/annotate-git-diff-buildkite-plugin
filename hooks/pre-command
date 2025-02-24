@@ -11,6 +11,8 @@ PLUGIN_COMPARE_BRANCH=$(plugin_read_config "COMPARE_BRANCH" "")  # Default to em
 PLUGIN_COMPARE_COMMITS=$(plugin_read_config "COMPARE_COMMITS" "1")
 PLUGIN_INCLUDE_MERGE_BASE=$(plugin_read_config "INCLUDE_MERGE_BASE" "true")
 PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
+PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
+PLUGIN_BUILDKITE_API_TOKEN=$(plugin_read_config "BUILDKITE_API_TOKEN" "")
 
 # Get current SHA
 CURRENT_SHA=${BUILDKITE_COMMIT}
@@ -21,7 +23,63 @@ if [[ "${PLUGIN_INCLUDE_SUBMODULES}" == "true" ]]; then
     DIFF_FLAGS="--submodule=diff"
 fi
 
-if [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
+if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
+    # Validate if the API access token is present
+    if [[ -z "${PLUGIN_BUILDKITE_API_TOKEN}" ]]; then
+        echo "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is true"
+        exit 1
+    fi
+
+
+    # Fetch the last two passed builds on the branch, sorted by descending build number.
+    # This returns the current build (if it's passed) and the immediately previous build. 
+    
+    API_RESPONSE=$(curl -sf -H "Authorization: Bearer ${PLUGIN_BUILDKITE_API_TOKEN}" \
+        "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds?&state=passed&per_page=2")
+
+    # A check in case the API call fails
+    if [[ $? -ne 0 ]]; then
+        buildkite-agent annotate "Failed to fetch build information from Buildkite API" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "error" \
+            --append
+        exit 1
+    fi
+
+    # Validate that we got a valid JSON response with builds
+    if ! echo "${API_RESPONSE}" | jq -e '. | length > 0' >/dev/null 2>&1; then
+        buildkite-agent annotate "No builds found in API response" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "error" \
+            --append
+        exit 1
+    fi
+
+    PREVIOUS_BUILD_SHA=$(echo "${API_RESPONSE}" | \
+        jq -r --arg current "$BUILDKITE_BUILD_NUMBER" 'if (.[0].number | tostring) == $current then .[1].commit else .[0].commit end')
+
+    if [[ -z "${PREVIOUS_BUILD_SHA}" || "${PREVIOUS_BUILD_SHA}" == "null" ]]; then
+        buildkite-agent annotate "No previous successful build found on branch ${BUILDKITE_BRANCH}" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "warning" \
+            --append
+        exit 0
+    fi
+
+    # Validate that we can fetch the commit
+    if ! git cat-file -e "${PREVIOUS_BUILD_SHA}^{commit}" 2>/dev/null; then
+        echo "Fetching commit ${PREVIOUS_BUILD_SHA} from remote..."
+        if ! git fetch origin "${PREVIOUS_BUILD_SHA}"; then
+            buildkite-agent annotate "Error: Could not fetch commit ${PREVIOUS_BUILD_SHA}" \
+                --context "${PLUGIN_CONTEXT}" \
+                --style "error" \
+                --append
+            exit 1
+        fi
+    fi
+
+    COMPARE_SHA=${PREVIOUS_BUILD_SHA}
+elif [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
     # If compare_branch is set, fetch and compare against it
     git fetch origin "${PLUGIN_COMPARE_BRANCH}"
     TARGET_BRANCH_SHA=$(git rev-parse "origin/${PLUGIN_COMPARE_BRANCH}")
@@ -40,7 +98,12 @@ fi
 
 # Check if there are any changes
 if [[ -z "$(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}")" ]]; then
-    if [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
+    if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
+        buildkite-agent annotate "No changes found between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "info" \
+            --append
+    elif [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
         buildkite-agent annotate "No changes found between ${COMPARE_SHA:0:8} on ${PLUGIN_COMPARE_BRANCH} and ${CURRENT_SHA:0:8} on ${BUILDKITE_BRANCH}" \
             --context "${PLUGIN_CONTEXT}" \
             --style "info" \
@@ -67,7 +130,9 @@ trap 'rm -f "${TEMP_MD}"' EXIT
 
 if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
     # Add header
-    if [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
+    if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
+        HEADER="Comparing changes between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})\n"
+    elif [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
         HEADER="Comparing changes between ${COMPARE_SHA:0:8} on ${PLUGIN_COMPARE_BRANCH} to ${CURRENT_SHA:0:8} on ${BUILDKITE_BRANCH}\n"
     else
         if [[ "${PLUGIN_COMPARE_COMMITS}" -eq 1 ]]; then
