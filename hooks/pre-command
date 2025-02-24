@@ -30,14 +30,11 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         exit 1
     fi
 
-
-    # Fetch the last two passed builds on the branch, sorted by descending build number.
-    # This returns the current build (if it's passed) and the immediately previous build. 
-    
+    # Fetch the last two passed builds on the branch
     API_RESPONSE=$(curl -sf -H "Authorization: Bearer ${PLUGIN_BUILDKITE_API_TOKEN}" \
         "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds?&state=passed&per_page=2")
 
-    # A check in case the API call fails
+    # Check if the API call failed
     if [[ $? -ne 0 ]]; then
         buildkite-agent annotate "Failed to fetch build information from Buildkite API" \
             --context "${PLUGIN_CONTEXT}" \
@@ -46,8 +43,21 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         exit 1
     fi
 
-    # Validate that we got a valid JSON response with builds
-    if ! echo "${API_RESPONSE}" | jq -e '. | length > 0' >/dev/null 2>&1; then
+    # Validating the basic JSON structure
+    if ! echo "${API_RESPONSE}" | grep -q '^\[.*\]$'; then
+        buildkite-agent annotate "Invalid JSON response format" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "error" \
+            --append
+        exit 1
+    fi
+
+    # Removing whitespace, splitting objects
+    builds=$(echo "${API_RESPONSE}" | tr -d '\n\r\t ' | sed -e 's/^\[//' -e 's/\]$//' -e 's/\},{/}\n{/g')
+    first_build=$(echo "$builds" | head -n1)
+    second_build=$(echo "$builds" | sed -n '2p')
+
+    if [ -z "$first_build" ]; then
         buildkite-agent annotate "No builds found in API response" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
@@ -55,8 +65,31 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         exit 1
     fi
 
-    PREVIOUS_BUILD_SHA=$(echo "${API_RESPONSE}" | \
-        jq -r --arg current "$BUILDKITE_BUILD_NUMBER" 'if (.[0].number | tostring) == $current then .[1].commit else .[0].commit end')
+    # Extracting values 
+    first_number=$(echo "$first_build" | grep -o '"number":[0-9]*' | sed 's/"number"://')
+    first_commit=$(echo "$first_build" | grep -o '"commit":"[a-f0-9]*"' | sed 's/"commit":"//' | sed 's/"//')
+
+    if [ -n "$second_build" ]; then
+        second_commit=$(echo "$second_build" | grep -o '"commit":"[a-f0-9]*"' | sed 's/"commit":"//' | sed 's/"//')
+    else
+        second_commit=""
+    fi
+
+    # Validating extracted values
+    if [ -z "$first_number" ] || [ -z "$first_commit" ]; then
+        buildkite-agent annotate "Failed to extract build information from API response" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "error" \
+            --append
+        exit 1
+    fi
+
+    # Determining which commit to use
+    if [ "$first_number" = "$BUILDKITE_BUILD_NUMBER" ] && [ -n "$second_commit" ]; then
+        PREVIOUS_BUILD_SHA=$second_commit
+    else
+        PREVIOUS_BUILD_SHA=$first_commit
+    fi
 
     if [[ -z "${PREVIOUS_BUILD_SHA}" || "${PREVIOUS_BUILD_SHA}" == "null" ]]; then
         buildkite-agent annotate "No previous successful build found on branch ${BUILDKITE_BRANCH}" \
@@ -66,7 +99,7 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         exit 0
     fi
 
-    # Validate that we can fetch the commit
+    # Validating that the commit can be fetched
     if ! git cat-file -e "${PREVIOUS_BUILD_SHA}^{commit}" 2>/dev/null; then
         echo "Fetching commit ${PREVIOUS_BUILD_SHA} from remote..."
         if ! git fetch origin "${PREVIOUS_BUILD_SHA}"; then
