@@ -31,11 +31,9 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
     fi
 
     # Fetch the last two passed builds on the branch
-    API_RESPONSE=$(curl -sf -H "Authorization: Bearer ${PLUGIN_BUILDKITE_API_TOKEN}" \
-        "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds?&state=passed&per_page=2")
-
-    # Check if the API call failed
-    if [[ $? -ne 0 ]]; then
+    if ! API_RESPONSE=$(curl -sf -H "Authorization: Bearer ${PLUGIN_BUILDKITE_API_TOKEN}" \
+        "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds?&state=passed&per_page=2"); then
+        
         buildkite-agent annotate "Failed to fetch build information from Buildkite API" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
