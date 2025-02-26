@@ -12,7 +12,8 @@ setup() {
       "COMPARE_COMMITS") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_COMMITS:-1}" ;;
       "INCLUDE_MERGE_BASE") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE:-true}" ;;
       "INCLUDE_SUBMODULES") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_SUBMODULES:-false}" ;;
-      "COMPARE_PREVIOUS_BUILD") echo "${BUILDKITE_PLUGIN_PLUGIN_COMPARE_PREVIOUS_BUILD:-false}" ;;
+      "COMPARE_PREVIOUS_BUILD") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD:-false}" ;;
+      "BUILDKITE_API_TOKEN") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_BUILDKITE_API_TOKEN:-}" ;;
     esac
   }
   export -f plugin_read_config
@@ -186,4 +187,36 @@ teardown() {
   unstub git
   unstub buildkite-agent
   unstub mktemp
+}
+
+# Tests for compare_previous_build functionality
+
+@test "Fails when compare_previous_build is true but API token is missing" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_BUILDKITE_API_TOKEN=""
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is true"
+}
+
+@test "Handles API request failure" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  stub curl "* : exit 1"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "Failed to fetch build information"
+
+  unstub curl
+  unstub buildkite-agent
 }
