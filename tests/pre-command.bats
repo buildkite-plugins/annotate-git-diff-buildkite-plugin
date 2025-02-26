@@ -202,12 +202,13 @@ teardown() {
 }
 
 @test "Handles API request failure" {
+  function curl() { return 1; }
+  export -f curl
+  
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_BUILDKITE_API_TOKEN="fake-token"
   export BUILDKITE_ORGANIZATION_SLUG="test-org"
   export BUILDKITE_PIPELINE_SLUG="test-pipeline"
-
-  stub curl "* : exit 1"
 
   stub buildkite-agent \
     "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
@@ -217,6 +218,5 @@ teardown() {
   assert_failure
   assert_output --partial "Failed to fetch build information"
 
-  unstub curl
   unstub buildkite-agent
 }
