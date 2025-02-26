@@ -209,7 +209,7 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
             echo "<details>"
             echo "<summary><strong>${FILE}</strong></summary>"
             echo
-            echo '```'${FILE_EXT}
+            echo '```'"${FILE_EXT}"
             git diff ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" -- "${FILE}"
             echo '```'
             echo "</details>"
