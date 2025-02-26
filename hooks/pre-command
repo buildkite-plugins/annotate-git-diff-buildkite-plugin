@@ -175,29 +175,47 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
 
     # shellcheck disable=SC2129
     echo -e "${HEADER}" >> "${TEMP_MD}"
-
-    # Add diff with terminal colors
-    {
-        echo '```term'
-        git diff --color=always ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}"
-        echo '```'
-    } >> "${TEMP_MD}"
-
-    # Add summary
-    {
-        echo
-        echo "**Summary:** $(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" | awk '
-            BEGIN { additions = 0; deletions = 0; files = 0 }
-            {
-                additions += $1;
-                deletions += $2;
-                files += 1
-            }
-            END {
-                print files " files changed, " additions " insertions(+), " deletions " deletions(-)"
-            }
-        ')"
-    } >> "${TEMP_MD}"
+    
+    # Get list of changed files
+    FILES_CHANGED=$(git diff --name-only ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}")
+    
+    # Add summary line
+    SUMMARY=$(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" | awk '
+        BEGIN { additions = 0; deletions = 0; files = 0 }
+        {
+            additions += $1;
+            deletions += $2;
+            files += 1
+        }
+        END {
+            print files " files changed, " additions " insertions(+), " deletions " deletions(-)"
+        }
+    ')
+    
+    echo -e "**Summary:** ${SUMMARY}\n" >> "${TEMP_MD}"
+    
+    # Create expandable sections for each file
+    for FILE in ${FILES_CHANGED}; do
+        # Get file extension for syntax highlighting
+        FILE_EXT="${FILE##*.}"
+        
+        # If no extension or extension is a path component, default to plain text
+        if [ "$FILE_EXT" = "$FILE" ] || [[ "$FILE_EXT" == */* ]]; then
+            FILE_EXT="txt"
+        fi
+        
+        # Create expandable section for this file
+        {
+            echo "<details>"
+            echo "<summary><strong>${FILE}</strong></summary>"
+            echo
+            echo '```'${FILE_EXT}
+            git diff ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" -- "${FILE}"
+            echo '```'
+            echo "</details>"
+            echo
+        } >> "${TEMP_MD}"
+    done
 else
     # Raw diff format
     git diff --color=always ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" > "${TEMP_MD}"
