@@ -47,8 +47,8 @@ Whether to include submodule changes in the diff output.
 Default: `false`
 
 ### `compare_previous_build` (optional)
-Whether to compare a build to the previous build. You'll need to provide an API access token with `read_builds` permissions to run this check
-- `true`: Shows submodule changes in diff and includes them in statistics
+Whether to compare a build to the previous build. You'll need to provide an API access token with `read_builds` permissions to run this check. Only use this chech as a standalone check, make sure to set other checks to false if you want to use the `compare_previous_build` check.
+- `true`: Shows changes between the last two successful builds on the pipeline
 - `false`: Does not compare a build to the previous build
 Default: `false`
 
@@ -85,7 +85,7 @@ steps:
   - plugins:
       - annotate-git-diff#v1.1.0:
           compare_previous_build: true
-          buildkite_api_token: $${BUILDKITE_API_TOKEN} # API access token with `read_builds` permissions
+          buildkite_api_token: ${BUILDKITE_API_TOKEN} # API access token with `read_builds` permissions. If you are setting the pipeline configuration in the Steps Editor, use `$${BUILDKITE_API_TOKEN}`.
 ```
 
 ### Raw diff format:
