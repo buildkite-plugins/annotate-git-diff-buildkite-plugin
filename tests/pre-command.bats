@@ -34,12 +34,14 @@ teardown() {
 
 @test "Compares against previous commit when no branch specified" {
   stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
     "rev-parse current-sha~1 : echo previous-sha" \
     "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
-    "diff --color=always previous-sha current-sha : echo 'diff output'" \
-    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'"
+    "diff --name-only previous-sha current-sha : echo 'file.txt'" \
+    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
+    "diff previous-sha current-sha -- file.txt : echo 'diff output for file.txt'"
 
   stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
 
@@ -58,14 +60,16 @@ teardown() {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE="true"
 
   stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
     "fetch origin develop : echo 'Fetching develop'" \
     "rev-parse origin/develop : echo target-branch-sha" \
     "merge-base target-branch-sha current-sha : echo merge-base-sha" \
     "diff --numstat merge-base-sha current-sha : echo '1  2  file.txt'" \
-    "diff --color=always merge-base-sha current-sha : echo 'diff output'" \
-    "diff --numstat merge-base-sha current-sha : echo '1  2  file.txt'"
+    "diff --name-only merge-base-sha current-sha : echo 'file.txt'" \
+    "diff --numstat merge-base-sha current-sha : echo '1  2  file.txt'" \
+    "diff merge-base-sha current-sha -- file.txt : echo 'diff output for file.txt'"
 
   stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
 
@@ -85,13 +89,15 @@ teardown() {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE="false"
 
   stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
     "fetch origin develop : echo 'Fetching develop'" \
     "rev-parse origin/develop : echo target-branch-sha" \
     "diff --numstat target-branch-sha current-sha : echo '1  2  file.txt'" \
-    "diff --color=always target-branch-sha current-sha : echo 'diff output'" \
-    "diff --numstat target-branch-sha current-sha : echo '1  2  file.txt'"
+    "diff --name-only target-branch-sha current-sha : echo 'file.txt'" \
+    "diff --numstat target-branch-sha current-sha : echo '1  2  file.txt'" \
+    "diff target-branch-sha current-sha -- file.txt : echo 'diff output for file.txt'"
 
   stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
 
@@ -108,12 +114,14 @@ teardown() {
 
 @test "Uses markdown format by default" {
   stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
     "rev-parse current-sha~1 : echo previous-sha" \
     "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
-    "diff --color=always previous-sha current-sha : echo '+new line'" \
-    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'"
+    "diff --name-only previous-sha current-sha : echo 'file.txt'" \
+    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
+    "diff previous-sha current-sha -- file.txt : echo '+new line'"
 
   stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
 
@@ -131,6 +139,7 @@ teardown() {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_FORMAT="diff"
 
   stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
     "rev-parse current-sha~1 : echo previous-sha" \
@@ -170,12 +179,14 @@ teardown() {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_SUBMODULES="true"
 
   stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
     "rev-parse current-sha~1 : echo previous-sha" \
     "diff --numstat --submodule=diff previous-sha current-sha : echo '1  2  src/submodules/mymodule'" \
-    "diff --color=always --submodule=diff previous-sha current-sha : echo 'Submodule src/submodules/mymodule updated 1234abc..5678def'" \
-    "diff --numstat --submodule=diff previous-sha current-sha : echo '1  2  src/submodules/mymodule'"
+    "diff --name-only --submodule=diff previous-sha current-sha : echo 'src/submodules/mymodule'" \
+    "diff --numstat --submodule=diff previous-sha current-sha : echo '1  2  src/submodules/mymodule'" \
+    "diff --submodule=diff previous-sha current-sha -- src/submodules/mymodule : echo 'Submodule src/submodules/mymodule updated 1234abc..5678def'"
 
   stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
 
@@ -189,7 +200,7 @@ teardown() {
   unstub mktemp
 }
 
-# Tests for compare_previous_build functionality
+# Tests for the compare_previous_build functionality
 
 @test "Fails when compare_previous_build is true but API token is missing" {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
@@ -202,13 +213,13 @@ teardown() {
 }
 
 @test "Handles API request failure" {
-  function curl() { return 1; }
-  export -f curl
-  
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_BUILDKITE_API_TOKEN="fake-token"
   export BUILDKITE_ORGANIZATION_SLUG="test-org"
   export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  # Stub the curl command to fail with a non-zero exit code
+  stub curl "-sf -H * https://api.buildkite.com/v2/organizations/test-org/pipelines/test-pipeline/builds?&state=passed&per_page=2 : exit 1"
 
   stub buildkite-agent \
     "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
@@ -218,5 +229,6 @@ teardown() {
   assert_failure
   assert_output --partial "Failed to fetch build information"
 
+  unstub curl
   unstub buildkite-agent
 }
