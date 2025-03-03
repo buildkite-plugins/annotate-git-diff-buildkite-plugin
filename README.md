@@ -88,6 +88,16 @@ steps:
           buildkite_api_token: ${BUILDKITE_API_TOKEN} # API access token with `read_builds` permissions. If you are setting the pipeline configuration in the Steps Editor, use `$${BUILDKITE_API_TOKEN}`.
 ```
 
+If you want to avoid setting the BUILDKITE_API_TOKEN in your pipeline configuration manually, you can use the `buildkite-agent secret get` approach:
+
+```yaml
+steps:
+  - plugins:
+      - annotate-git-diff#v1.1.0:
+          compare_previous_build: true
+          buildkite_api_token: $(buildkite-agent secret get $$BUILDKITE_API_TOKEN) # If you are setting the pipeline configuration in the Steps Editor, use `$(buildkite-agent secret get $$BUILDKITE_API_TOKEN)`.
+```
+
 ### Raw diff format:
 ```yaml
 steps:
