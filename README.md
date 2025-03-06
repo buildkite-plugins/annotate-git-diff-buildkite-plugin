@@ -58,7 +58,7 @@ Default: `false`
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_branch: "main"
 ```
 
@@ -66,7 +66,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_commits: 3  # Shows changes in last 3 commits
 ```
 
@@ -74,7 +74,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_branch: "main"
           include_submodules: true
 ```
@@ -83,7 +83,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_previous_build: true
           buildkite_api_token: ${BUILDKITE_API_TOKEN} # API access token with `read_builds` permissions. If you are setting the pipeline configuration in the Steps Editor, use `$${BUILDKITE_API_TOKEN}`.
 ```
@@ -93,7 +93,7 @@ If you want to avoid setting the BUILDKITE_API_TOKEN in your pipeline configurat
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_previous_build: true
           buildkite_api_token: $(buildkite-agent secret get $$BUILDKITE_API_TOKEN) # If you are setting the pipeline configuration in the Steps Editor, use `$(buildkite-agent secret get $$BUILDKITE_API_TOKEN)`.
 ```
@@ -102,7 +102,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           format: "diff"
 ```
 

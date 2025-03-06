@@ -63,7 +63,7 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         exit 1
     fi
 
-    # Extract values from the JSON
+    # Extract values 
     first_number=$(echo "$first_build" | grep -o '"number":[0-9]*' | sed 's/"number"://')
     first_commit=$(echo "$first_build" | grep -o '"commit":"[a-f0-9]*"' | sed 's/"commit":"//' | sed 's/"//')
 
@@ -73,7 +73,7 @@ if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         second_commit=""
     fi
 
-    # Validate the extracted values
+    # Validate extracted values
     if [ -z "$first_number" ] || [ -z "$first_commit" ]; then
         buildkite-agent annotate "Failed to extract build information from API response" \
             --context "${PLUGIN_CONTEXT}" \
@@ -116,7 +116,7 @@ elif [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
     TARGET_BRANCH_SHA=$(git rev-parse "origin/${PLUGIN_COMPARE_BRANCH}")
 
     if [[ "${PLUGIN_INCLUDE_MERGE_BASE}" == "true" ]]; then
-        # Find the merge-base between target branch and current commit
+        # Find the merge-base (common ancestor) between target branch and current commit
         COMPARE_SHA=$(git merge-base "${TARGET_BRANCH_SHA}" "${CURRENT_SHA}")
     else
         # Use the head of the target branch
@@ -127,7 +127,7 @@ else
     COMPARE_SHA=$(git rev-parse "${CURRENT_SHA}~${PLUGIN_COMPARE_COMMITS}")
 fi
 
-# Check if there are any changes between the builds
+# Check if there are any changes
 if [[ -z "$(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}")" ]]; then
     if [[ "${PLUGIN_COMPARE_PREVIOUS_BUILD}" == "true" ]]; then
         buildkite-agent annotate "No changes found between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})" \
@@ -194,7 +194,7 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
     
     echo -e "**Summary:** ${SUMMARY}\n" >> "${TEMP_MD}"
     
-    # Create expandable sections for each changed file
+    # Create expandable sections for each file
     for FILE in ${FILES_CHANGED}; do
         # Get file extension for syntax highlighting
         FILE_EXT="${FILE##*.}"
@@ -225,4 +225,3 @@ buildkite-agent annotate "$(cat "${TEMP_MD}")" \
     --context "${PLUGIN_CONTEXT}" \
     --style "info" \
     --append
-    
