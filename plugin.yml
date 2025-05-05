@@ -25,4 +25,7 @@ configuration:
     include_submodules:
       type: boolean
       default: false
+    compare_previous_build:
+      type: boolean
+      default: false
   additionalProperties: false

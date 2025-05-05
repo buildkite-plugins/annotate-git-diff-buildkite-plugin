@@ -1,6 +1,6 @@
 # Git Diff Buildkite Plugin
 
-A Buildkite plugin that shows git diff as a build annotation. You can compare against a target branch, a specific number of previous commits, or include submodule changes.
+A Buildkite plugin that shows git diff as a build annotation. You can compare against a target branch, a specific number of previous commits, include submodule changes, or compare a build against previous build.
 
 ## Example
 
@@ -10,13 +10,14 @@ Add the following to your `pipeline.yml`:
 steps:
   - command: echo "Running with git diff..."
     plugins:
-      - annotate-git-diff#v1.1.0:
-          context: "my-diff"           # optional
-          format: "markdown"           # optional (markdown|diff)
-          compare_branch: "main"       # optional (defaults to comparing against previous commit)
-          compare_commits: 3           # optional (compare against 3 commits back, ignored if compare_branch is set)
-          include_merge_base: true     # optional (defaults to true)
-          include_submodules: false    # optional (defaults to false)
+      - annotate-git-diff#v1.2.0:
+          context: "my-diff"               # optional
+          format: "markdown"               # optional (markdown|diff)
+          compare_branch: "main"           # optional (defaults to comparing against previous commit)
+          compare_commits: 3               # optional (compare against 3 commits back, ignored if compare_branch is set)
+          include_merge_base: true         # optional (defaults to true)
+          include_submodules: false        # optional (defaults to false)
+          compare_previous_build: false    # optional (defaults to false)
 ```
 
 ## Configuration
@@ -45,13 +46,24 @@ Whether to include submodule changes in the diff output.
 - `false`: Excludes submodule changes
 Default: `false`
 
+### `compare_previous_build` (optional)
+
+> [!NOTE]
+> Requires an API Access Token with `read_builds` permission to be available via the environment variable `$BUILDKITE_API_TOKEN`.
+
+Whether to compare a build to the previous build. You'll need to provide an API Access Token with `read_builds` permissions to run this check.
+Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
+- `true`: Shows changes between the last two successful builds on the pipeline
+- `false`: Does not compare a build to the previous build
+Default: `false`
+
 ## Usage Examples
 
 ### Compare against a branch:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_branch: "main"
 ```
 
@@ -59,7 +71,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_commits: 3  # Shows changes in last 3 commits
 ```
 
@@ -67,16 +79,24 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           compare_branch: "main"
           include_submodules: true
+```
+
+### Compare a build to a previous build:
+```yaml
+steps:
+  - plugins:
+      - annotate-git-diff#v1.2.0:
+          compare_previous_build: true
 ```
 
 ### Raw diff format:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.1.0:
+      - annotate-git-diff#v1.2.0:
           format: "diff"
 ```
 
