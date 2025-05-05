@@ -28,8 +28,4 @@ configuration:
     compare_previous_build:
       type: boolean
       default: false
-    buildkite_api_token:
-      type: string
-      default: ""
   additionalProperties: false
-    

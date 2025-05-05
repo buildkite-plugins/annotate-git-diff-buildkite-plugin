@@ -10,13 +10,13 @@ Add the following to your `pipeline.yml`:
 steps:
   - command: echo "Running with git diff..."
     plugins:
-      - annotate-git-diff#v1.1.0:
-          context: "my-diff"           # optional
-          format: "markdown"           # optional (markdown|diff)
-          compare_branch: "main"       # optional (defaults to comparing against previous commit)
-          compare_commits: 3           # optional (compare against 3 commits back, ignored if compare_branch is set)
-          include_merge_base: true     # optional (defaults to true)
-          include_submodules: false    # optional (defaults to false)
+      - annotate-git-diff#v1.2.0:
+          context: "my-diff"               # optional
+          format: "markdown"               # optional (markdown|diff)
+          compare_branch: "main"           # optional (defaults to comparing against previous commit)
+          compare_commits: 3               # optional (compare against 3 commits back, ignored if compare_branch is set)
+          include_merge_base: true         # optional (defaults to true)
+          include_submodules: false        # optional (defaults to false)
           compare_previous_build: false    # optional (defaults to false)
 ```
 
@@ -47,7 +47,12 @@ Whether to include submodule changes in the diff output.
 Default: `false`
 
 ### `compare_previous_build` (optional)
-Whether to compare a build to the previous build. You'll need to provide an API access token with `read_builds` permissions to run this check. Only use this chech as a standalone check, make sure to set other checks to false if you want to use the `compare_previous_build` check.
+
+> [!NOTE]
+> Requires an API Access Token with `read_builds` permission to be available via the environment variable `$BUILDKITE_API_TOKEN`.
+
+Whether to compare a build to the previous build. You'll need to provide an API Access Token with `read_builds` permissions to run this check.
+Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
 - `true`: Shows changes between the last two successful builds on the pipeline
 - `false`: Does not compare a build to the previous build
 Default: `false`
@@ -85,17 +90,6 @@ steps:
   - plugins:
       - annotate-git-diff#v1.2.0:
           compare_previous_build: true
-          buildkite_api_token: ${BUILDKITE_API_TOKEN} # API access token with `read_builds` permissions. If you are setting the pipeline configuration in the Steps Editor, use `$${BUILDKITE_API_TOKEN}`.
-```
-
-If you want to avoid setting the BUILDKITE_API_TOKEN in your pipeline configuration manually, you can use the `buildkite-agent secret get` approach:
-
-```yaml
-steps:
-  - plugins:
-      - annotate-git-diff#v1.2.0:
-          compare_previous_build: true
-          buildkite_api_token: $(buildkite-agent secret get $$BUILDKITE_API_TOKEN) # If you are setting the pipeline configuration in the Steps Editor, use `$(buildkite-agent secret get $$BUILDKITE_API_TOKEN)`.
 ```
 
 ### Raw diff format:
