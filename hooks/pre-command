@@ -12,6 +12,9 @@ PLUGIN_COMPARE_COMMITS=$(plugin_read_config "COMPARE_COMMITS" "1")
 PLUGIN_INCLUDE_MERGE_BASE=$(plugin_read_config "INCLUDE_MERGE_BASE" "true")
 PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
 PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
+# Buildkite annotation bodies are capped at ~1 MiB. Default to 900 KiB to leave
+# headroom for the header, summary and truncation notice.
+PLUGIN_MAX_BODY_BYTES=$(plugin_read_config "MAX_BODY_BYTES" "921600")
 
 # Get current SHA
 CURRENT_SHA=${BUILDKITE_COMMIT}
@@ -193,8 +196,19 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
 
     echo -e "**Summary:** ${SUMMARY}\n" >> "${TEMP_MD}"
 
-    # Create expandable sections for each file
+    # Create expandable sections for each file, stopping if we'd exceed the
+    # Buildkite annotation body size limit.
+    TRUNCATED=false
+    OMITTED_FILES=()
+    SECTION_TMP=$(mktemp)
+    trap 'rm -f "${TEMP_MD}" "${SECTION_TMP}"' EXIT
+
     for FILE in ${FILES_CHANGED}; do
+        if [[ "${TRUNCATED}" == true ]]; then
+            OMITTED_FILES+=("${FILE}")
+            continue
+        fi
+
         # Get file extension for syntax highlighting
         FILE_EXT="${FILE##*.}"
 
@@ -203,7 +217,8 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
             FILE_EXT="txt"
         fi
 
-        # Create expandable section for this file
+        # Build this file's section in a temp buffer first so we can measure
+        # its size before committing it to the annotation body.
         {
             echo "<details>"
             echo "<summary><strong>${FILE}</strong></summary>"
@@ -213,14 +228,53 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
             echo '```'
             echo "</details>"
             echo
-        } >> "${TEMP_MD}"
+        } > "${SECTION_TMP}"
+
+        CURRENT_SIZE=$(wc -c < "${TEMP_MD}")
+        SECTION_SIZE=$(wc -c < "${SECTION_TMP}")
+        if (( CURRENT_SIZE + SECTION_SIZE > PLUGIN_MAX_BODY_BYTES )); then
+            TRUNCATED=true
+            OMITTED_FILES+=("${FILE}")
+            continue
+        fi
+
+        cat "${SECTION_TMP}" >> "${TEMP_MD}"
     done
+
+    if [[ "${TRUNCATED}" == true ]]; then
+        {
+            echo
+            echo "> :warning: **Diff truncated.** The full diff exceeds Buildkite's annotation size limit (~1 MiB)."
+            echo "> ${#OMITTED_FILES[@]} file(s) were omitted from this annotation:"
+            echo ">"
+            for F in "${OMITTED_FILES[@]}"; do
+                echo "> - \`${F}\`"
+            done
+        } >> "${TEMP_MD}"
+    fi
 else
     # Raw diff format
     git diff --color=always ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" > "${TEMP_MD}"
+
+    RAW_SIZE=$(wc -c < "${TEMP_MD}")
+    if (( RAW_SIZE > PLUGIN_MAX_BODY_BYTES )); then
+        # Truncate to the last complete line that fits within the budget,
+        # leaving room for the notice we append below.
+        TRUNCATED_TMP=$(mktemp)
+        head -c "${PLUGIN_MAX_BODY_BYTES}" "${TEMP_MD}" | sed '$d' > "${TRUNCATED_TMP}"
+        {
+            cat "${TRUNCATED_TMP}"
+            echo
+            echo "--- Diff truncated: full output (${RAW_SIZE} bytes) exceeds Buildkite's annotation size limit (~1 MiB). ---"
+        } > "${TEMP_MD}"
+        rm -f "${TRUNCATED_TMP}"
+    fi
 fi
 
-buildkite-agent annotate "$(cat "${TEMP_MD}")" \
+# Pipe the body in via stdin to avoid ARG_MAX ("Argument list too long") on
+# large diffs.
+buildkite-agent annotate \
     --context "${PLUGIN_CONTEXT}" \
     --style "info" \
-    --append
+    --append \
+    < "${TEMP_MD}"

@@ -46,6 +46,9 @@ Whether to include submodule changes in the diff output.
 - `false`: Excludes submodule changes
 Default: `false`
 
+### `max_body_bytes` (optional)
+Maximum size (in bytes) of the annotation body. Buildkite caps annotation bodies at ~1 MiB, so when a diff is larger than this value the plugin truncates the output and appends a notice listing the files that were omitted (markdown format) or a trailing truncation marker (diff format). Default: `921600` (900 KiB), which leaves headroom under the 1 MiB server-side cap.
+
 ### `compare_previous_build` (optional)
 
 > [!NOTE]

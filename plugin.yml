@@ -28,4 +28,8 @@ configuration:
     compare_previous_build:
       type: boolean
       default: false
+    max_body_bytes:
+      type: integer
+      default: 921600
+      minimum: 1
   additionalProperties: false
