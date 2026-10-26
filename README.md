@@ -47,7 +47,7 @@ Whether to include submodule changes in the diff output.
 Default: `false`
 
 ### `max_body_bytes` (optional)
-Maximum size (in bytes) of the annotation body. Buildkite caps annotation bodies at ~1 MiB, so when a diff is larger than this value the plugin truncates the output and appends a notice listing the files that were omitted (markdown format) or a trailing truncation marker (diff format). Default: `921600` (900 KiB), which leaves headroom under the 1 MiB server-side cap.
+Maximum size in bytes of the complete annotation body sent to `buildkite-agent annotate`. `buildkite-agent` enforces a hard limit of 1 MiB (1,048,576 bytes) per annotation body ([source](https://github.com/buildkite/agent/blob/main/clicommand/annotate.go)). When the diff would push the body over this cap the plugin truncates the output and appends a notice; in markdown format the notice lists the omitted files (truncated to `... and N more file(s)` when even the list won't fit), and in diff format the body is cut at a line boundary and marked with a trailing truncation line. Default: `1000000` (slightly under 1 MiB to leave headroom).
 
 ### `compare_previous_build` (optional)
 

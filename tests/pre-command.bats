@@ -13,7 +13,7 @@ setup() {
       "INCLUDE_MERGE_BASE") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE:-true}" ;;
       "INCLUDE_SUBMODULES") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_SUBMODULES:-false}" ;;
       "COMPARE_PREVIOUS_BUILD") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD:-false}" ;;
-      "MAX_BODY_BYTES") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES:-921600}" ;;
+      "MAX_BODY_BYTES") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES:-1000000}" ;;
     esac
   }
   export -f plugin_read_config
@@ -222,25 +222,23 @@ teardown() {
   assert_output --partial "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is true"
 }
 
-@test "Truncates markdown diff and lists omitted files when over the body size cap" {
-  # Chosen so the first file's section fits but the second (large) section won't.
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="500"
+@test "Truncates diff and lists omitted files within the body cap" {
+  # Cap is small enough that the second file won't fit, but the omitted-files
+  # list and warning preamble still have room.
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="4096"
 
   stub mktemp \
     "echo '${BATS_TMPDIR}/diff.md'" \
     "echo '${BATS_TMPDIR}/section.md'"
   touch "${BATS_TMPDIR}/diff.md"
 
-  # The first file's section produces a payload (~160 bytes with details markup)
-  # that fits under the 200-byte cap once the header/summary are written.
-  # The second file would push us past the cap and must land in the omitted list.
   stub git \
     "rev-parse current-sha~1 : echo previous-sha" \
     "diff --numstat previous-sha current-sha : printf '1\t2\tsmall.txt\n1000\t500\tbig.txt\n'" \
     "diff --name-only previous-sha current-sha : printf 'small.txt\nbig.txt\n'" \
     "diff --numstat previous-sha current-sha : printf '1\t2\tsmall.txt\n1000\t500\tbig.txt\n'" \
     "diff previous-sha current-sha -- small.txt : echo 'tiny'" \
-    "diff previous-sha current-sha -- big.txt : head -c 500 /dev/zero | tr '\\\\0' 'X'"
+    "diff previous-sha current-sha -- big.txt : head -c 5000 /dev/zero | tr '\\\\0' 'X'"
 
   stub buildkite-agent "annotate --context '*' --style 'info' --append : cat > '${BATS_TMPDIR}/body.out'; echo Annotation created"
 
@@ -249,10 +247,59 @@ teardown() {
   assert_success
   assert_output --partial "Annotation created"
 
-  # The posted body should contain the truncation notice and name the omitted file.
   run cat "${BATS_TMPDIR}/body.out"
   assert_output --partial "Diff truncated"
   assert_output --partial "big.txt"
+
+  # Final body must be <= cap, inclusive of the warning and omitted list.
+  run wc -c "${BATS_TMPDIR}/body.out"
+  [[ "${lines[0]%% *}" -le 4096 ]]
+
+  unstub git
+  unstub buildkite-agent
+  unstub mktemp
+}
+
+@test "Caps body size even when the omitted files list is huge" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="4096"
+
+  # Produce many file names so the omitted list itself would blow the cap
+  # unless the plugin truncates it with "... and N more".
+  many_files() {
+    local n=200
+    for ((i=0; i<n; i++)); do
+      printf 'path/to/some/very/long/filename-with-lots-of-chars-%03d.txt\n' "$i"
+    done
+  }
+  export -f many_files
+
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
+  touch "${BATS_TMPDIR}/diff.md"
+
+  stub git \
+    "rev-parse current-sha~1 : echo previous-sha" \
+    "diff --numstat previous-sha current-sha : echo '1 1 one'" \
+    "diff --name-only previous-sha current-sha : many_files" \
+    "diff --numstat previous-sha current-sha : echo '1 1 one'" \
+    "diff previous-sha current-sha -- * : head -c 6000 /dev/zero | tr '\\\\0' 'Y'"
+
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : cat > '${BATS_TMPDIR}/body.out'; echo Annotation created"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_success
+
+  # Final body must still fit under the cap.
+  size=$(wc -c < "${BATS_TMPDIR}/body.out")
+  [[ "${size}" -le 4096 ]]
+
+  # And the notice should contain the "and N more" marker since 200 omitted
+  # files cannot all be listed in ~4 KiB.
+  run cat "${BATS_TMPDIR}/body.out"
+  assert_output --partial "Diff truncated"
+  assert_output --partial "more file(s)"
 
   unstub git
   unstub buildkite-agent
