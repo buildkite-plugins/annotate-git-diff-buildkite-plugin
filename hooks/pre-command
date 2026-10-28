@@ -14,7 +14,19 @@ PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
 PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
 # buildkite-agent caps annotation bodies at 1 MiB (1048576 bytes). Default to a
 # slightly lower value so we leave headroom for the agent's own overhead.
-PLUGIN_MAX_BODY_BYTES=$(plugin_read_config "MAX_BODY_BYTES" "1000000")
+PLUGIN_MAX_BODY_BYTES_DEFAULT=1000000
+PLUGIN_MAX_BODY_BYTES=$(plugin_read_config "MAX_BODY_BYTES" "${PLUGIN_MAX_BODY_BYTES_DEFAULT}")
+
+# Validate in case  plugin is ran with --no-plugin-validation 
+# PLUGIN_MAX_BODY_BYTES must be a positive integer and must not exceed the default cap
+if ! [[ "${PLUGIN_MAX_BODY_BYTES}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: max_body_bytes must be a positive integer (got '${PLUGIN_MAX_BODY_BYTES}')" >&2
+    exit 1
+fi
+if (( PLUGIN_MAX_BODY_BYTES > PLUGIN_MAX_BODY_BYTES_DEFAULT )); then
+    echo "Error: max_body_bytes (${PLUGIN_MAX_BODY_BYTES}) must not exceed ${PLUGIN_MAX_BODY_BYTES_DEFAULT}" >&2
+    exit 1
+fi
 
 # Reserve a slice of the cap for the truncation notice (preamble + omitted
 # files list) so the complete body — diff sections + notice — stays under the
@@ -251,7 +263,7 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
         # "... and N more file(s)" if it would push the body over the cap.
         {
             echo
-            echo "> :warning: **Diff truncated.** The full diff exceeds Buildkite's annotation body limit (1 MiB)."
+            echo "> :warning: **Diff truncated.** The full diff exceeds the configured annotation size limit."
             echo "> ${#OMITTED_FILES[@]} file(s) were omitted from this annotation:"
             echo ">"
         } >> "${TEMP_MD}"

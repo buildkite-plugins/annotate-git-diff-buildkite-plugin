@@ -306,6 +306,24 @@ teardown() {
   unstub mktemp
 }
 
+@test "Fails when max_body_bytes is not a positive integer" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="not-a-number"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "max_body_bytes must be a positive integer"
+}
+
+@test "Fails when max_body_bytes exceeds the default cap" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="1048576"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "must not exceed 1000000"
+}
+
 @test "Handles API request failure" {
   function curl() { return 1; }
   export -f curl
