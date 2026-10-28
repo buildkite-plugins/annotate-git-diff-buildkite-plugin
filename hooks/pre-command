@@ -12,6 +12,29 @@ PLUGIN_COMPARE_COMMITS=$(plugin_read_config "COMPARE_COMMITS" "1")
 PLUGIN_INCLUDE_MERGE_BASE=$(plugin_read_config "INCLUDE_MERGE_BASE" "true")
 PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
 PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
+# buildkite-agent caps annotation bodies at 1 MiB (1048576 bytes). Default to a
+# slightly lower value so we leave headroom for the agent's own overhead.
+PLUGIN_MAX_BODY_BYTES_DEFAULT=1000000
+PLUGIN_MAX_BODY_BYTES=$(plugin_read_config "MAX_BODY_BYTES" "${PLUGIN_MAX_BODY_BYTES_DEFAULT}")
+
+# Validate in case  plugin is ran with --no-plugin-validation 
+# PLUGIN_MAX_BODY_BYTES must be a positive integer and must not exceed the default cap
+if ! [[ "${PLUGIN_MAX_BODY_BYTES}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: max_body_bytes must be a positive integer (got '${PLUGIN_MAX_BODY_BYTES}')" >&2
+    exit 1
+fi
+if (( PLUGIN_MAX_BODY_BYTES > PLUGIN_MAX_BODY_BYTES_DEFAULT )); then
+    echo "Error: max_body_bytes (${PLUGIN_MAX_BODY_BYTES}) must not exceed ${PLUGIN_MAX_BODY_BYTES_DEFAULT}" >&2
+    exit 1
+fi
+
+# Reserve a slice of the cap for the truncation notice (preamble + omitted
+# files list) so the complete body — diff sections + notice — stays under the
+# cap. Minimum 2 KiB, maximum half of the cap.
+NOTICE_RESERVE=$(( PLUGIN_MAX_BODY_BYTES / 20 ))
+(( NOTICE_RESERVE < 2048 )) && NOTICE_RESERVE=2048
+(( NOTICE_RESERVE > PLUGIN_MAX_BODY_BYTES / 2 )) && NOTICE_RESERVE=$(( PLUGIN_MAX_BODY_BYTES / 2 ))
+CONTENT_BUDGET=$(( PLUGIN_MAX_BODY_BYTES - NOTICE_RESERVE ))
 
 # Get current SHA
 CURRENT_SHA=${BUILDKITE_COMMIT}
@@ -193,17 +216,26 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
 
     echo -e "**Summary:** ${SUMMARY}\n" >> "${TEMP_MD}"
 
-    # Create expandable sections for each file
-    for FILE in ${FILES_CHANGED}; do
-        # Get file extension for syntax highlighting
-        FILE_EXT="${FILE##*.}"
+    # Build expandable sections for each file, stopping once the next section
+    # would push the body past CONTENT_BUDGET (which leaves room for the notice).
+    TRUNCATED=false
+    OMITTED_FILES=()
+    SECTION_TMP=$(mktemp)
+    trap 'rm -f "${TEMP_MD}" "${SECTION_TMP}"' EXIT
 
-        # If no extension or extension is a path component, default to plain text
+    for FILE in ${FILES_CHANGED}; do
+        if [[ "${TRUNCATED}" == true ]]; then
+            OMITTED_FILES+=("${FILE}")
+            continue
+        fi
+
+        FILE_EXT="${FILE##*.}"
         if [ "$FILE_EXT" = "$FILE" ] || [[ "$FILE_EXT" == */* ]]; then
             FILE_EXT="txt"
         fi
 
-        # Create expandable section for this file
+        # Build this file's section in a buffer so we can measure it before
+        # committing it to the annotation body.
         {
             echo "<details>"
             echo "<summary><strong>${FILE}</strong></summary>"
@@ -213,14 +245,75 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
             echo '```'
             echo "</details>"
             echo
-        } >> "${TEMP_MD}"
+        } > "${SECTION_TMP}"
+
+        CURRENT_SIZE=$(wc -c < "${TEMP_MD}")
+        SECTION_SIZE=$(wc -c < "${SECTION_TMP}")
+        if (( CURRENT_SIZE + SECTION_SIZE > CONTENT_BUDGET )); then
+            TRUNCATED=true
+            OMITTED_FILES+=("${FILE}")
+            continue
+        fi
+
+        cat "${SECTION_TMP}" >> "${TEMP_MD}"
     done
+
+    if [[ "${TRUNCATED}" == true ]]; then
+        # Preamble is always emitted; the omitted list gets truncated with
+        # "... and N more file(s)" if it would push the body over the cap.
+        {
+            echo
+            echo "> :warning: **Diff truncated.** The full diff exceeds the configured annotation size limit."
+            echo "> ${#OMITTED_FILES[@]} file(s) were omitted from this annotation:"
+            echo ">"
+        } >> "${TEMP_MD}"
+
+        LISTED=0
+        TAIL_RESERVE=80   # bytes kept free for the "... and N more" tail
+        for F in "${OMITTED_FILES[@]}"; do
+            LINE="> - \`${F}\`"
+            LINE_BYTES=$(( ${#LINE} + 1 ))   # +1 for newline
+            CURRENT_SIZE=$(wc -c < "${TEMP_MD}")
+            if (( CURRENT_SIZE + LINE_BYTES + TAIL_RESERVE > PLUGIN_MAX_BODY_BYTES )); then
+                REMAINING=$(( ${#OMITTED_FILES[@]} - LISTED ))
+                echo "> - ... and ${REMAINING} more file(s)" >> "${TEMP_MD}"
+                break
+            fi
+            echo "${LINE}" >> "${TEMP_MD}"
+            LISTED=$(( LISTED + 1 ))
+        done
+    fi
 else
     # Raw diff format
     git diff --color=always ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}" > "${TEMP_MD}"
+
+    RAW_SIZE=$(wc -c < "${TEMP_MD}")
+    if (( RAW_SIZE > PLUGIN_MAX_BODY_BYTES )); then
+        TRUNCATED_TMP=$(mktemp)
+        # Truncate to CONTENT_BUDGET at a line boundary, then append the notice.
+        head -c "${CONTENT_BUDGET}" "${TEMP_MD}" | sed '$d' > "${TRUNCATED_TMP}"
+        {
+            cat "${TRUNCATED_TMP}"
+            echo
+            echo "--- Diff truncated: full output (${RAW_SIZE} bytes) exceeds Buildkite's annotation body limit (1 MiB). ---"
+        } > "${TEMP_MD}"
+        rm -f "${TRUNCATED_TMP}"
+    fi
 fi
 
-buildkite-agent annotate "$(cat "${TEMP_MD}")" \
+# Safety net: if the body is still over the cap for any reason, hard-truncate
+# so buildkite-agent accepts it (it rejects >1 MiB client-side).
+FINAL_SIZE=$(wc -c < "${TEMP_MD}")
+if (( FINAL_SIZE > PLUGIN_MAX_BODY_BYTES )); then
+    SAFETY_TMP=$(mktemp)
+    head -c "${PLUGIN_MAX_BODY_BYTES}" "${TEMP_MD}" > "${SAFETY_TMP}"
+    mv "${SAFETY_TMP}" "${TEMP_MD}"
+fi
+
+# Pipe the body in via stdin to avoid ARG_MAX ("Argument list too long") on
+# large diffs.
+buildkite-agent annotate \
     --context "${PLUGIN_CONTEXT}" \
     --style "info" \
-    --append
+    --append \
+    < "${TEMP_MD}"

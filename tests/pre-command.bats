@@ -13,6 +13,7 @@ setup() {
       "INCLUDE_MERGE_BASE") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE:-true}" ;;
       "INCLUDE_SUBMODULES") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_SUBMODULES:-false}" ;;
       "COMPARE_PREVIOUS_BUILD") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD:-false}" ;;
+      "MAX_BODY_BYTES") echo "${BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES:-1000000}" ;;
     esac
   }
   export -f plugin_read_config
@@ -32,7 +33,9 @@ teardown() {
 }
 
 @test "Compares against previous commit when no branch specified" {
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
   touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
@@ -42,7 +45,7 @@ teardown() {
     "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
     "diff previous-sha current-sha -- file.txt : echo 'diff output for file.txt'"
 
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : echo Annotation created"
 
   run "$PWD"/hooks/pre-command
 
@@ -58,7 +61,9 @@ teardown() {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_BRANCH="develop"
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE="true"
 
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
   touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
@@ -70,7 +75,7 @@ teardown() {
     "diff --numstat merge-base-sha current-sha : echo '1  2  file.txt'" \
     "diff merge-base-sha current-sha -- file.txt : echo 'diff output for file.txt'"
 
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : echo Annotation created"
 
   run "$PWD"/hooks/pre-command
 
@@ -87,7 +92,9 @@ teardown() {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_BRANCH="develop"
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_MERGE_BASE="false"
 
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
   touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
@@ -98,7 +105,7 @@ teardown() {
     "diff --numstat target-branch-sha current-sha : echo '1  2  file.txt'" \
     "diff target-branch-sha current-sha -- file.txt : echo 'diff output for file.txt'"
 
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : echo Annotation created"
 
   run "$PWD"/hooks/pre-command
 
@@ -112,7 +119,9 @@ teardown() {
 }
 
 @test "Uses markdown format by default" {
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
   touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
@@ -122,7 +131,7 @@ teardown() {
     "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
     "diff previous-sha current-sha -- file.txt : echo '+new line'"
 
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : echo Annotation created"
 
   run "$PWD"/hooks/pre-command
 
@@ -145,7 +154,7 @@ teardown() {
     "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
     "diff --color=always previous-sha current-sha : echo 'raw diff output'"
 
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : echo Annotation created"
 
   run "$PWD"/hooks/pre-command
 
@@ -177,7 +186,9 @@ teardown() {
 @test "Detects submodule changes when enabled" {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_INCLUDE_SUBMODULES="true"
 
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
   touch "${BATS_TMPDIR}/diff.md"  # Create the file so it exists
 
   stub git \
@@ -187,7 +198,7 @@ teardown() {
     "diff --numstat --submodule=diff previous-sha current-sha : echo '1  2  src/submodules/mymodule'" \
     "diff --submodule=diff previous-sha current-sha -- src/submodules/mymodule : echo 'Submodule src/submodules/mymodule updated 1234abc..5678def'"
 
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : echo Annotation created"
 
   run "$PWD"/hooks/pre-command
 
@@ -209,6 +220,108 @@ teardown() {
 
   assert_failure
   assert_output --partial "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is true"
+}
+
+@test "Truncates diff and lists omitted files within the body cap" {
+  # Cap is small enough that the second file won't fit, but the omitted-files
+  # list and warning preamble still have room.
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="4096"
+
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
+  touch "${BATS_TMPDIR}/diff.md"
+
+  stub git \
+    "rev-parse current-sha~1 : echo previous-sha" \
+    "diff --numstat previous-sha current-sha : printf '1\t2\tsmall.txt\n1000\t500\tbig.txt\n'" \
+    "diff --name-only previous-sha current-sha : printf 'small.txt\nbig.txt\n'" \
+    "diff --numstat previous-sha current-sha : printf '1\t2\tsmall.txt\n1000\t500\tbig.txt\n'" \
+    "diff previous-sha current-sha -- small.txt : echo 'tiny'" \
+    "diff previous-sha current-sha -- big.txt : head -c 5000 /dev/zero | tr '\\\\0' 'X'"
+
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : cat > '${BATS_TMPDIR}/body.out'; echo Annotation created"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_success
+  assert_output --partial "Annotation created"
+
+  run cat "${BATS_TMPDIR}/body.out"
+  assert_output --partial "Diff truncated"
+  assert_output --partial "big.txt"
+
+  # Final body must be <= cap, inclusive of the warning and omitted list.
+  run wc -c "${BATS_TMPDIR}/body.out"
+  [[ "${lines[0]%% *}" -le 4096 ]]
+
+  unstub git
+  unstub buildkite-agent
+  unstub mktemp
+}
+
+@test "Caps body size even when the omitted files list is huge" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="4096"
+
+  # Produce many file names so the omitted list itself would blow the cap
+  # unless the plugin truncates it with "... and N more".
+  many_files() {
+    local n=200
+    for ((i=0; i<n; i++)); do
+      printf 'path/to/some/very/long/filename-with-lots-of-chars-%03d.txt\n' "$i"
+    done
+  }
+  export -f many_files
+
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
+  touch "${BATS_TMPDIR}/diff.md"
+
+  stub git \
+    "rev-parse current-sha~1 : echo previous-sha" \
+    "diff --numstat previous-sha current-sha : echo '1 1 one'" \
+    "diff --name-only previous-sha current-sha : many_files" \
+    "diff --numstat previous-sha current-sha : echo '1 1 one'" \
+    "diff previous-sha current-sha -- * : head -c 6000 /dev/zero | tr '\\\\0' 'Y'"
+
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : cat > '${BATS_TMPDIR}/body.out'; echo Annotation created"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_success
+
+  # Final body must still fit under the cap.
+  size=$(wc -c < "${BATS_TMPDIR}/body.out")
+  [[ "${size}" -le 4096 ]]
+
+  # And the notice should contain the "and N more" marker since 200 omitted
+  # files cannot all be listed in ~4 KiB.
+  run cat "${BATS_TMPDIR}/body.out"
+  assert_output --partial "Diff truncated"
+  assert_output --partial "more file(s)"
+
+  unstub git
+  unstub buildkite-agent
+  unstub mktemp
+}
+
+@test "Fails when max_body_bytes is not a positive integer" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="not-a-number"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "max_body_bytes must be a positive integer"
+}
+
+@test "Fails when max_body_bytes exceeds the default cap" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_MAX_BODY_BYTES="1048576"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "must not exceed 1000000"
 }
 
 @test "Handles API request failure" {
