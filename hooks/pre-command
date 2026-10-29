@@ -13,11 +13,22 @@ PLUGIN_INCLUDE_MERGE_BASE=$(plugin_read_config "INCLUDE_MERGE_BASE" "true")
 PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
 PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
 
-# Normalize: map true/on/1 → "passed" (back-compat), false/off/0 → ""
-case "${PLUGIN_COMPARE_PREVIOUS_BUILD,,}" in
-    true|on|1)    COMPARE_BUILD_STATE="passed" ;;
-    false|off|0)  COMPARE_BUILD_STATE="" ;;
-    any_outcome)  COMPARE_BUILD_STATE="finished" ;;   # Buildkite's meta-state for ran-to-completion
+# Lowercase via `tr` for Bash 3.2 compatibility (macOS). ${var,,} needs Bash 4+.
+PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | tr '[:upper:]' '[:lower:]')
+
+# Normalize: true/on/1 enables with state=passed (back-compat); any_outcome enables
+# with no state filter so running/scheduled/skipped/not_run builds are also considered;
+# false/off/0 disables.
+COMPARE_BUILD_ENABLED=""
+COMPARE_BUILD_STATE=""
+case "${PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER}" in
+    true|on|1)
+        COMPARE_BUILD_ENABLED="true"
+        COMPARE_BUILD_STATE="passed" ;;
+    false|off|0)
+        : ;;
+    any_outcome)
+        COMPARE_BUILD_ENABLED="true" ;;
     *)
         buildkite-agent annotate "Invalid \`compare_previous_build\` value: \`${PLUGIN_COMPARE_PREVIOUS_BUILD}\`. Must be \`true\`, \`false\`, or \`any_outcome\`." \
             --context "${PLUGIN_CONTEXT}" \
@@ -35,16 +46,29 @@ if [[ "${PLUGIN_INCLUDE_SUBMODULES:-false}" =~ ^(true|on|1)$ ]]; then
     DIFF_FLAGS="--submodule=diff"
 fi
 
-if [ -n "${COMPARE_BUILD_STATE}" ]; then
+if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
     # Validate if the API access token is present
     if [ -z "${BUILDKITE_API_TOKEN:-}" ]; then
         echo "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is enabled"
         exit 1
     fi
 
+    # Build curl args as an array so --data-urlencode handles branch names
+    # containing +, &, #, / and other characters that would otherwise be mis-parsed.
+    CURL_ARGS=(
+        -sf
+        --get
+        -H "Authorization: Bearer ${BUILDKITE_API_TOKEN}"
+        --data-urlencode "branch=${BUILDKITE_BRANCH}"
+        --data-urlencode "per_page=2"
+    )
+    if [ -n "${COMPARE_BUILD_STATE}" ]; then
+        CURL_ARGS+=(--data-urlencode "state=${COMPARE_BUILD_STATE}")
+    fi
+    API_URL="https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds"
+
     # Fetch the last two builds on the branch
-    API_URL="https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds?branch=${BUILDKITE_BRANCH}&state=${COMPARE_BUILD_STATE}&per_page=2"
-    if ! API_RESPONSE=$(curl -sf -H "Authorization: Bearer ${BUILDKITE_API_TOKEN}" "${API_URL}"); then
+    if ! API_RESPONSE=$(curl "${CURL_ARGS[@]}" "${API_URL}"); then
 
         buildkite-agent annotate "Failed to fetch build information from Buildkite API" \
             --context "${PLUGIN_CONTEXT}" \
@@ -141,7 +165,7 @@ fi
 
 # Check if there are any changes
 if [[ -z "$(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}")" ]]; then
-    if [ -n "${COMPARE_BUILD_STATE}" ]; then
+    if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
         buildkite-agent annotate "No changes found between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})" \
             --context "${PLUGIN_CONTEXT}" \
             --style "info" \
@@ -173,7 +197,7 @@ trap 'rm -f "${TEMP_MD}"' EXIT
 
 if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
     # Add header
-    if [ -n "${COMPARE_BUILD_STATE}" ]; then
+    if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
         HEADER="Comparing changes between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})\n"
     elif [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
         HEADER="Comparing changes between ${COMPARE_SHA:0:8} on ${PLUGIN_COMPARE_BRANCH} to ${CURRENT_SHA:0:8} on ${BUILDKITE_BRANCH}\n"

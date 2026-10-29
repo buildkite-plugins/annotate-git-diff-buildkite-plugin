@@ -255,7 +255,7 @@ teardown() {
   unstub buildkite-agent
 }
 
-@test "Builds API URL with state=finished when compare_previous_build is any_outcome" {
+@test "Omits state filter in API URL when compare_previous_build is any_outcome" {
   function curl() {
     echo "CURL_ARGS: $*" >&2
     return 1
@@ -273,8 +273,8 @@ teardown() {
   run "$PWD"/hooks/pre-command
 
   assert_failure
-  assert_output --partial "state=finished"
   assert_output --partial "branch=feature-branch"
+  refute_output --partial "state="
 
   unstub buildkite-agent
 }
@@ -349,6 +349,33 @@ teardown() {
   unstub mktemp
 }
 
+@test "Passes branch through curl --data-urlencode for special characters" {
+  function curl() {
+    echo "CURL_ARGS: $*" >&2
+    return 1
+  }
+  export -f curl
+
+  export BUILDKITE_BRANCH="feature/a+b&c"
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  # The branch value must reach curl via --data-urlencode so curl encodes +, &, # etc.
+  # If it were interpolated into the URL path directly, the & would start a new query
+  # parameter and + would decode as a space.
+  assert_output --partial "--data-urlencode branch=feature/a+b&c"
+
+  unstub buildkite-agent
+}
+
 @test "Fails with error annotation when compare_previous_build has invalid value" {
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="finsihed"
 
@@ -381,7 +408,8 @@ teardown() {
   run "$PWD"/hooks/pre-command
 
   assert_failure
-  assert_output --partial "state=finished"
+  assert_output --partial "branch=feature-branch"
+  refute_output --partial "state="
 
   unstub buildkite-agent
 }

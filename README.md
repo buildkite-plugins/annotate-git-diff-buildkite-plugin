@@ -55,7 +55,7 @@ Whether to compare a build to the previous build. You'll need to provide an API 
 Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
 - `true`: Shows changes between the last two successful builds on the current branch
 - `false`: Does not compare a build to the previous build
-- `any_outcome`: Shows changes between the last two builds on the current branch regardless of state. However, a canceled/blocked build's commit SHA may not represent a meaningful code change to diff against.
+- `any_outcome`: Shows changes between the last two builds on the current branch regardless of state (including running, scheduled, skipped, blocked, canceled). A build's commit SHA from an in-progress or canceled build may not represent a meaningful code change to diff against.
 
 Default: `false`
 
