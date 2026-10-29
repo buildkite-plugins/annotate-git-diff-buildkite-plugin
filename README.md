@@ -17,7 +17,7 @@ steps:
           compare_commits: 3               # optional (compare against 3 commits back, ignored if compare_branch is set)
           include_merge_base: true         # optional (defaults to true)
           include_submodules: false        # optional (defaults to false)
-          compare_previous_build: false    # optional (defaults to false)
+          compare_previous_build: false    # optional (true|false|any_outcome, defaults to false)
 ```
 
 ## Configuration
@@ -53,8 +53,10 @@ Default: `false`
 
 Whether to compare a build to the previous build. You'll need to provide an API Access Token with `read_builds` permissions to run this check.
 Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
-- `true`: Shows changes between the last two successful builds on the pipeline
+- `true`: Shows changes between the last two successful builds on the current branch
 - `false`: Does not compare a build to the previous build
+- `any_outcome`: Shows changes between the last two builds on the current branch regardless of state. However, a canceled/blocked build's commit SHA may not represent a meaningful code change to diff against.
+
 Default: `false`
 
 ## Usage Examples
@@ -90,6 +92,14 @@ steps:
   - plugins:
       - annotate-git-diff#v1.2.0:
           compare_previous_build: true
+```
+
+### Compare against the previous build regardless of outcome:
+```yaml
+steps:
+  - plugins:
+      - annotate-git-diff#v1.2.0:
+          compare_previous_build: any_outcome
 ```
 
 ### Raw diff format:
