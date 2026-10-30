@@ -55,7 +55,7 @@ Whether to compare a build to the previous build. You'll need to provide an API 
 Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
 - `true`: Shows changes between the last two successful builds on the current branch
 - `false`: Does not compare a build to the previous build
-- `passed_or_failed`: Shows changes between the last two `finished` builds on the current branch that either `passed` or `failed`. A blocked or canceled build state is excluded since a build commit SHA from a blocked or canceled build may not represent a meaningful code change to diff against.
+- `passed_or_failed`: Shows changes between the last two builds on the current branch that either passed or failed. Blocked or canceled builds are excluded since their commit SHA may not represent a meaningful code change to diff against.
 
 Default: `false`
 

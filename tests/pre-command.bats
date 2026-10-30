@@ -282,74 +282,49 @@ teardown() {
   unstub buildkite-agent
 }
 
-@test "Accepts legacy truthy alias 'on' as compare_previous_build value" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="on"
+@test "Fails when compare_previous_build is passed_or_failed but API token is missing" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="passed_or_failed"
   export BUILDKITE_API_TOKEN=""
 
   run "$PWD"/hooks/pre-command
 
   assert_failure
-  assert_output --partial "BUILDKITE_API_TOKEN is required"
+  assert_output --partial "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is enabled"
 }
 
-@test "Accepts legacy truthy alias '1' as compare_previous_build value" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="1"
-  export BUILDKITE_API_TOKEN=""
+@test "Warns and exits 0 when no earlier build is found on the branch" {
+  # Mock curl to simulate HTTP 200 with a response array whose only entry has the same
+  # build number as this build — jq's `select(.number < $current)` filters it out, so
+  # PREVIOUS_BUILD_SHA ends up empty and the warning path fires.
+  function curl() {
+    local headers_file=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -D) headers_file="$2"; shift 2 ;;
+        *)  shift ;;
+      esac
+    done
+    [ -n "$headers_file" ] && : > "$headers_file"
+    # Body followed by '\n<status>' to match `-w '\n%{http_code}'`
+    printf '[{"number":123,"commit":"same-sha"}]\n200'
+    return 0
+  }
+  export -f curl
 
-  run "$PWD"/hooks/pre-command
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
 
-  assert_failure
-  assert_output --partial "BUILDKITE_API_TOKEN is required"
-}
-
-@test "Accepts legacy falsy alias 'off' as compare_previous_build value" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="off"
-
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
-  touch "${BATS_TMPDIR}/diff.md"
-
-  stub git \
-    "rev-parse current-sha~1 : echo previous-sha" \
-    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
-    "diff --name-only previous-sha current-sha : echo 'file.txt'" \
-    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
-    "diff previous-sha current-sha -- file.txt : echo 'diff output'"
-
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
-
-  run "$PWD"/hooks/pre-command
-
-  assert_success
-  assert_output --partial "Annotation created"
-
-  unstub git
-  unstub buildkite-agent
-  unstub mktemp
-}
-
-@test "Accepts legacy falsy alias '0' as compare_previous_build value" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="0"
-
-  stub mktemp "echo '${BATS_TMPDIR}/diff.md'"
-  touch "${BATS_TMPDIR}/diff.md"
-
-  stub git \
-    "rev-parse current-sha~1 : echo previous-sha" \
-    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
-    "diff --name-only previous-sha current-sha : echo 'file.txt'" \
-    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
-    "diff previous-sha current-sha -- file.txt : echo 'diff output'"
-
-  stub buildkite-agent "annotate '*' --context '*' --style 'info' --append : echo Annotation created"
+  stub buildkite-agent \
+    "annotate * --context * --style 'warning' --append : echo 'No previous build found warning'"
 
   run "$PWD"/hooks/pre-command
 
   assert_success
-  assert_output --partial "Annotation created"
+  assert_output --partial "No previous build found warning"
 
-  unstub git
   unstub buildkite-agent
-  unstub mktemp
 }
 
 @test "Passes branch through curl --data-urlencode for special characters" {
@@ -401,6 +376,30 @@ teardown() {
   export -f curl
 
   export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="PASSED_OR_FAILED"
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "state[]=passed"
+  assert_output --partial "state[]=failed"
+
+  unstub buildkite-agent
+}
+
+@test "Accepts mixed-case 'Passed_Or_Failed' via case-insensitive match" {
+  function curl() {
+    echo "CURL_ARGS: $*" >&2
+    return 1
+  }
+  export -f curl
+
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="Passed_Or_Failed"
   export BUILDKITE_API_TOKEN="fake-token"
   export BUILDKITE_ORGANIZATION_SLUG="test-org"
   export BUILDKITE_PIPELINE_SLUG="test-pipeline"

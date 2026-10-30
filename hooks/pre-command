@@ -18,16 +18,16 @@ PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | 
 
 # Normalize: true/on/1 keeps the pre-existing state=passed behaviour;
 # passed_or_failed matches builds in either state; false/off/0 disables.
-COMPARE_BUILD_ENABLED=""
+COMPARE_BUILD_ENABLED=false
 COMPARE_BUILD_STATES=()
 case "${PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER}" in
-    true|on|1)
-        COMPARE_BUILD_ENABLED="true"
+    true)
+        COMPARE_BUILD_ENABLED=true
         COMPARE_BUILD_STATES=("passed") ;;
-    false|off|0)
+    false)
         : ;;
     passed_or_failed)
-        COMPARE_BUILD_ENABLED="true"
+        COMPARE_BUILD_ENABLED=true
         COMPARE_BUILD_STATES=("passed" "failed") ;;
     *)
         buildkite-agent annotate "Invalid \`compare_previous_build\` value: \`${PLUGIN_COMPARE_PREVIOUS_BUILD}\`. Must be \`true\`, \`false\`, or \`passed_or_failed\`." \
@@ -40,14 +40,32 @@ esac
 # Get current SHA
 CURRENT_SHA=${BUILDKITE_COMMIT}
 
+# Tempfile paths — pre-declared so one EXIT trap covers both the API-call tempfiles
+# and the markdown-rendering tempfile without re-trapping later.
+HEADERS_FILE=""
+TEMP_MD=""
+# `2>/dev/null || true` tolerates BSD rm's complaint about empty-string paths.
+trap 'rm -f "${HEADERS_FILE}" "${TEMP_MD}" 2>/dev/null || true' EXIT
+
 # Set up git diff flags
 DIFF_FLAGS=""
 if [[ "${PLUGIN_INCLUDE_SUBMODULES:-false}" =~ ^(true|on|1)$ ]]; then
     DIFF_FLAGS="--submodule=diff"
 fi
 
-if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
-    # Validate if the API access token is present
+if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
+
+    # BUILDKITE_BRANCH is always set in real Buildkite jobs; guard for local/synthetic runs
+    # so the hook fails loudly rather than sending `branch=` (which Buildkite may treat as
+    # no filter, silently diffing against an unrelated branch's commit).
+    if [ -z "${BUILDKITE_BRANCH:-}" ]; then
+        buildkite-agent annotate "compare_previous_build requires BUILDKITE_BRANCH to be set" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "error" \
+            --append
+        exit 1
+    fi
+
     if [ -z "${BUILDKITE_API_TOKEN:-}" ]; then
         echo "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is enabled"
         exit 1
@@ -55,24 +73,42 @@ if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
 
     # Build curl args as an array so --data-urlencode handles branch names
     # containing +, &, #, / and other characters that would otherwise be mis-parsed.
+    # per_page=5 tolerates a handful of concurrent builds that may have finished before us.
     CURL_ARGS=(
-        -sf
+        -s
         --get
         -H "Authorization: Bearer ${BUILDKITE_API_TOKEN}"
         --data-urlencode "branch=${BUILDKITE_BRANCH}"
-        --data-urlencode "per_page=2"
+        --data-urlencode "per_page=5"
         --data-urlencode "exclude_jobs=true"
     )
     # Rails-style multi-value filter: state[]=passed[&state[]=failed]
     for state in "${COMPARE_BUILD_STATES[@]}"; do
         CURL_ARGS+=(--data-urlencode "state[]=${state}")
     done
-    API_URL="https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds"
 
-    # Fetch the last two builds on the branch
-    if ! API_RESPONSE=$(curl "${CURL_ARGS[@]}" "${API_URL}"); then
+    # Fetch with up to one retry on 429. Captures body and HTTP status in one call;
+    # dumps response headers so we can honour Retry-After / RateLimit-Reset.
+    HEADERS_FILE=$(mktemp)
+    HTTP_STATUS=""
+    API_RESPONSE=""
+    for attempt in 1 2; do
+        curl_out=$(curl "${CURL_ARGS[@]}" \
+            -D "${HEADERS_FILE}" \
+            -w '\n%{http_code}' \
+            "https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds") || curl_out=""
+        HTTP_STATUS="${curl_out##*$'\n'}"
+        API_RESPONSE="${curl_out%$'\n'*}"
+        [ "${HTTP_STATUS}" != "429" ] && break
+        [ "${attempt}" = "2" ] && break
+        retry_after=$(grep -iE '^(retry-after|ratelimit-reset):' "${HEADERS_FILE}" | head -1 | awk '{print $2}' | tr -d '\r\n')
+        [[ "${retry_after}" =~ ^[0-9]+$ ]] || retry_after=2
+        echo "Rate limited by Buildkite API; retrying in ${retry_after}s..."
+        sleep "${retry_after}"
+    done
 
-        buildkite-agent annotate "Failed to fetch build information from Buildkite API" \
+    if [ "${HTTP_STATUS}" != "200" ]; then
+        buildkite-agent annotate "Failed to fetch build information from Buildkite API (HTTP ${HTTP_STATUS:-unknown})" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
             --append
@@ -88,46 +124,26 @@ if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
         exit 1
     fi
 
-    # Split builds from API response
-    first_build=$(jq -r '.[0]' <<< "${API_RESPONSE}")
-    second_build=$(jq -r '.[1]' <<< "${API_RESPONSE}")
-
-    if [ -z "$first_build" ]; then
-        buildkite-agent annotate "No builds found in API response" \
+    # Defensive against unexpected 200 bodies (e.g. {"message": "..."}) so we surface a
+    # clearer error than "No previous build found" on an object response.
+    if [ "$(jq -r 'type' <<< "${API_RESPONSE}")" != "array" ]; then
+        buildkite-agent annotate "Unexpected Buildkite API response shape (expected array of builds)" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
             --append
         exit 1
     fi
 
-    # Extract first build values
-    first_number=$(jq -r '.number' <<< "${first_build}")
-    first_commit=$(jq -r '.commit' <<< "${first_build}")
+    # Pick the first returned build whose number is strictly less than ours. The /builds
+    # endpoint is sorted newest-first, so a later-triggered build that finished first (e.g.
+    # a quick failure on the next commit) would otherwise be picked as "previous". `//
+    # empty` yields "" when no earlier build is found, which the next guard converts into a
+    # friendly annotation.
+    PREVIOUS_BUILD_SHA=$(jq -r --argjson current "${BUILDKITE_BUILD_NUMBER}" \
+        'map(select(.number < $current and .commit != null)) | .[0].commit // empty' \
+        <<< "${API_RESPONSE}")
 
-    # Extract second build value
-    if [ -n "$second_build" ]; then
-        second_commit=$(jq -r '.commit' <<< "${second_build}")
-    else
-        second_commit=""
-    fi
-
-    # Validate extracted values
-    if [ -z "$first_number" ] || [ -z "$first_commit" ]; then
-        buildkite-agent annotate "Failed to extract build information from API response" \
-            --context "${PLUGIN_CONTEXT}" \
-            --style "error" \
-            --append
-        exit 1
-    fi
-
-    # Determine which commit to use
-    if [ "$first_number" = "$BUILDKITE_BUILD_NUMBER" ] && [ -n "$second_commit" ]; then
-        PREVIOUS_BUILD_SHA=$second_commit
-    else
-        PREVIOUS_BUILD_SHA=$first_commit
-    fi
-
-    if [[ -z "${PREVIOUS_BUILD_SHA}" || "${PREVIOUS_BUILD_SHA}" == "null" ]]; then
+    if [ -z "${PREVIOUS_BUILD_SHA}" ]; then
         buildkite-agent annotate "No previous build found on branch ${BUILDKITE_BRANCH}" \
             --context "${PLUGIN_CONTEXT}" \
             --style "warning" \
@@ -167,7 +183,7 @@ fi
 
 # Check if there are any changes
 if [[ -z "$(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}")" ]]; then
-    if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
+    if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
         buildkite-agent annotate "No changes found between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})" \
             --context "${PLUGIN_CONTEXT}" \
             --style "info" \
@@ -193,13 +209,12 @@ if [[ -z "$(git diff --numstat ${DIFF_FLAGS} "${COMPARE_SHA}" "${CURRENT_SHA}")"
     exit 0
 fi
 
-# Create temporary markdown file
+# Create temporary markdown file (cleaned up by the EXIT trap set near the top)
 TEMP_MD=$(mktemp)
-trap 'rm -f "${TEMP_MD}"' EXIT
 
 if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
     # Add header
-    if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
+    if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
         HEADER="Comparing changes between previous build (${COMPARE_SHA:0:8}) and current build (${CURRENT_SHA:0:8})\n"
     elif [ -n "${PLUGIN_COMPARE_BRANCH}" ]; then
         HEADER="Comparing changes between ${COMPARE_SHA:0:8} on ${PLUGIN_COMPARE_BRANCH} to ${CURRENT_SHA:0:8} on ${BUILDKITE_BRANCH}\n"
