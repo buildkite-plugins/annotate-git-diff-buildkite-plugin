@@ -231,7 +231,7 @@ teardown() {
   unstub buildkite-agent
 }
 
-@test "Builds API URL with state=passed when compare_previous_build is true" {
+@test "Builds API URL with state[]=passed when compare_previous_build is true" {
   function curl() {
     echo "CURL_ARGS: $*" >&2
     return 1
@@ -249,20 +249,22 @@ teardown() {
   run "$PWD"/hooks/pre-command
 
   assert_failure
-  assert_output --partial "state=passed"
+  assert_output --partial "state[]=passed"
   assert_output --partial "branch=feature-branch"
+  # true mode must not add state[]=failed
+  refute_output --partial "state[]=failed"
 
   unstub buildkite-agent
 }
 
-@test "Omits state filter in API URL when compare_previous_build is any_outcome" {
+@test "Builds API URL with state[]=passed and state[]=failed when compare_previous_build is passed_or_failed" {
   function curl() {
     echo "CURL_ARGS: $*" >&2
     return 1
   }
   export -f curl
 
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="any_outcome"
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="passed_or_failed"
   export BUILDKITE_API_TOKEN="fake-token"
   export BUILDKITE_ORGANIZATION_SLUG="test-org"
   export BUILDKITE_PIPELINE_SLUG="test-pipeline"
@@ -273,8 +275,9 @@ teardown() {
   run "$PWD"/hooks/pre-command
 
   assert_failure
+  assert_output --partial "state[]=passed"
+  assert_output --partial "state[]=failed"
   assert_output --partial "branch=feature-branch"
-  refute_output --partial "state="
 
   unstub buildkite-agent
 }
@@ -390,14 +393,14 @@ teardown() {
   unstub buildkite-agent
 }
 
-@test "Accepts uppercase 'ANY_OUTCOME' via case-insensitive match" {
+@test "Accepts uppercase 'PASSED_OR_FAILED' via case-insensitive match" {
   function curl() {
     echo "CURL_ARGS: $*" >&2
     return 1
   }
   export -f curl
 
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="ANY_OUTCOME"
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="PASSED_OR_FAILED"
   export BUILDKITE_API_TOKEN="fake-token"
   export BUILDKITE_ORGANIZATION_SLUG="test-org"
   export BUILDKITE_PIPELINE_SLUG="test-pipeline"
@@ -408,8 +411,8 @@ teardown() {
   run "$PWD"/hooks/pre-command
 
   assert_failure
-  assert_output --partial "branch=feature-branch"
-  refute_output --partial "state="
+  assert_output --partial "state[]=passed"
+  assert_output --partial "state[]=failed"
 
   unstub buildkite-agent
 }

@@ -16,21 +16,21 @@ PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "fal
 # Lowercase via `tr` for Bash 3.2 compatibility (macOS). ${var,,} needs Bash 4+.
 PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | tr '[:upper:]' '[:lower:]')
 
-# Normalize: true/on/1 enables with state=passed (back-compat); any_outcome enables
-# with no state filter so running/scheduled/skipped/not_run builds are also considered;
-# false/off/0 disables.
+# Normalize: true/on/1 keeps the pre-existing state=passed behaviour;
+# passed_or_failed matches builds in either state; false/off/0 disables.
 COMPARE_BUILD_ENABLED=""
-COMPARE_BUILD_STATE=""
+COMPARE_BUILD_STATES=()
 case "${PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER}" in
     true|on|1)
         COMPARE_BUILD_ENABLED="true"
-        COMPARE_BUILD_STATE="passed" ;;
+        COMPARE_BUILD_STATES=("passed") ;;
     false|off|0)
         : ;;
-    any_outcome)
-        COMPARE_BUILD_ENABLED="true" ;;
+    passed_or_failed)
+        COMPARE_BUILD_ENABLED="true"
+        COMPARE_BUILD_STATES=("passed" "failed") ;;
     *)
-        buildkite-agent annotate "Invalid \`compare_previous_build\` value: \`${PLUGIN_COMPARE_PREVIOUS_BUILD}\`. Must be \`true\`, \`false\`, or \`any_outcome\`." \
+        buildkite-agent annotate "Invalid \`compare_previous_build\` value: \`${PLUGIN_COMPARE_PREVIOUS_BUILD}\`. Must be \`true\`, \`false\`, or \`passed_or_failed\`." \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
             --append
@@ -61,10 +61,12 @@ if [ -n "${COMPARE_BUILD_ENABLED}" ]; then
         -H "Authorization: Bearer ${BUILDKITE_API_TOKEN}"
         --data-urlencode "branch=${BUILDKITE_BRANCH}"
         --data-urlencode "per_page=2"
+        --data-urlencode "exclude_jobs=true"
     )
-    if [ -n "${COMPARE_BUILD_STATE}" ]; then
-        CURL_ARGS+=(--data-urlencode "state=${COMPARE_BUILD_STATE}")
-    fi
+    # Rails-style multi-value filter: state[]=passed[&state[]=failed]
+    for state in "${COMPARE_BUILD_STATES[@]}"; do
+        CURL_ARGS+=(--data-urlencode "state[]=${state}")
+    done
     API_URL="https://api.buildkite.com/v2/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds"
 
     # Fetch the last two builds on the branch

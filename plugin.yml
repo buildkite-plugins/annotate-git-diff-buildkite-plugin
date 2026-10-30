@@ -29,6 +29,6 @@ configuration:
       oneOf:
       - type: boolean
       - type: string
-        enum: ["any_outcome"]
+        enum: ["passed_or_failed"]
       default: false
   additionalProperties: false

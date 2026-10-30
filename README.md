@@ -17,7 +17,7 @@ steps:
           compare_commits: 3               # optional (compare against 3 commits back, ignored if compare_branch is set)
           include_merge_base: true         # optional (defaults to true)
           include_submodules: false        # optional (defaults to false)
-          compare_previous_build: false    # optional (true|false|any_outcome, defaults to false)
+          compare_previous_build: false    # optional (true|false|passed_or_failed, defaults to false)
 ```
 
 ## Configuration
@@ -55,7 +55,7 @@ Whether to compare a build to the previous build. You'll need to provide an API 
 Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
 - `true`: Shows changes between the last two successful builds on the current branch
 - `false`: Does not compare a build to the previous build
-- `any_outcome`: Shows changes between the last two builds on the current branch regardless of state (including running, scheduled, skipped, blocked, canceled). A build's commit SHA from an in-progress or canceled build may not represent a meaningful code change to diff against.
+- `passed_or_failed`: Shows changes between the last two `finished` builds on the current branch that either `passed` or `failed`. A blocked or canceled build state is excluded since a build commit SHA from a blocked or canceled build may not represent a meaningful code change to diff against.
 
 Default: `false`
 
@@ -94,12 +94,12 @@ steps:
           compare_previous_build: true
 ```
 
-### Compare against the previous build regardless of outcome:
+### Compare against the previous passed or failed build:
 ```yaml
 steps:
   - plugins:
       - annotate-git-diff#v1.2.0:
-          compare_previous_build: any_outcome
+          compare_previous_build: passed_or_failed
 ```
 
 ### Raw diff format:
