@@ -701,6 +701,12 @@ teardown() {
   run cat "${BATS_TMPDIR}/body.out"
   assert_output --partial "Comparing changes between previous build (previous) and current build (current-)"
 
+  # Regression test: HEADERS_FILE used to be dropped from EXIT cleanup once the
+  # trap was re-registered later in the script (trap EXIT replaces rather than
+  # stacks), leaking this tempfile on every compare_previous_build run.
+  run test -e "${BATS_TMPDIR}/headers.txt"
+  assert_failure
+
   unstub git
   unstub buildkite-agent
   unstub mktemp

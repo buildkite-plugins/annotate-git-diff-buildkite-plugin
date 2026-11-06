@@ -76,7 +76,10 @@ CURRENT_SHA=${BUILDKITE_COMMIT}
 HEADERS_FILE=""
 TEMP_MD=""
 SECTION_TMP=""
-# `2>/dev/null || true` tolerates BSD rm's complaint about empty-string paths.
+# `|| true` matters more than it looks: under `set -e`, a failing command inside an EXIT
+# trap overrides whatever exit status the script was already returning (even an explicit
+# `exit 0`), so a transient rm failure during cleanup must never flip a successful run into
+# a reported failure. `2>/dev/null` just silences rm's stderr if that ever happens.
 trap 'rm -f "${HEADERS_FILE}" "${TEMP_MD}" "${SECTION_TMP}" 2>/dev/null || true' EXIT
 
 # Set up git diff flags
