@@ -25,6 +25,16 @@ configuration:
     include_submodules:
       type: boolean
       default: false
+    # This schema intentionally doesn't exactly mirror what hooks/pre-command accepts:
+    #   - The hook lowercases its input and accepts any case of passed_or_failed
+    #     (e.g. PASSED_OR_FAILED), but the enum below only allows the lowercase string.
+    #   - A quoted "true"/"false" string would be accepted by the hook (it just compares
+    #     text) but rejected here, since this field is typed as a boolean.
+    # Pipeline validation only checks against this schema, so normal usage never exercises
+    # the hook's extra tolerance. That tolerance exists for config that reaches the hook
+    # unvalidated — e.g. `--no-plugin-validation`, or BUILDKITE_PLUGIN_* env vars set
+    # directly rather than through pipeline.yml — so it's kept intentionally looser here
+    # rather than tightened to match the schema exactly.
     compare_previous_build:
       oneOf:
       - type: boolean

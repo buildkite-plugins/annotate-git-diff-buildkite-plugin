@@ -14,13 +14,16 @@ PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
 PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
 
 # Lowercase via `tr` for Bash 3.2 compatibility (macOS). ${var,,} needs Bash 4+.
-PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | tr '[:upper:]' '[:lower:]')
+# `read` then trims leading/trailing whitespace so a stray space doesn't fall
+# through to the invalid-value branch below.
+COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | tr '[:upper:]' '[:lower:]')
+read -r COMPARE_PREVIOUS_BUILD_LOWER <<< "${COMPARE_PREVIOUS_BUILD_LOWER}"
 
-# Normalize: true/on/1 keeps the pre-existing state=passed behaviour;
-# passed_or_failed matches builds in either state; false/off/0 disables.
+# Normalize: true keeps the pre-existing state=passed behaviour;
+# passed_or_failed matches builds in either state; false disables.
 COMPARE_BUILD_ENABLED=false
 COMPARE_BUILD_STATES=()
-case "${PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER}" in
+case "${COMPARE_PREVIOUS_BUILD_LOWER}" in
     true)
         COMPARE_BUILD_ENABLED=true
         COMPARE_BUILD_STATES=("passed") ;;
@@ -30,7 +33,9 @@ case "${PLUGIN_COMPARE_PREVIOUS_BUILD_LOWER}" in
         COMPARE_BUILD_ENABLED=true
         COMPARE_BUILD_STATES=("passed" "failed") ;;
     *)
-        buildkite-agent annotate "Invalid \`compare_previous_build\` value: \`${PLUGIN_COMPARE_PREVIOUS_BUILD}\`. Must be \`true\`, \`false\`, or \`passed_or_failed\`." \
+        # Bounded to keep a misconfigured (e.g. accidentally huge) value from
+        # bloating the annotation body.
+        buildkite-agent annotate "Invalid \`compare_previous_build\` value: \`${PLUGIN_COMPARE_PREVIOUS_BUILD:0:200}\`. Must be \`true\`, \`false\`, or \`passed_or_failed\`." \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
             --append
@@ -64,12 +69,15 @@ CONTENT_BUDGET=$(( PLUGIN_MAX_BODY_BYTES - NOTICE_RESERVE ))
 # Get current SHA
 CURRENT_SHA=${BUILDKITE_COMMIT}
 
-# Tempfile paths — pre-declared so one EXIT trap covers both the API-call tempfiles
-# and the markdown-rendering tempfile without re-trapping later.
+# Tempfile paths — pre-declared so one EXIT trap covers the API-call tempfile,
+# the markdown-rendering tempfile, and the per-file section buffer without
+# re-trapping later (trap EXIT replaces the handler rather than stacking it,
+# so reassigning it after one of these is created would drop the others).
 HEADERS_FILE=""
 TEMP_MD=""
+SECTION_TMP=""
 # `2>/dev/null || true` tolerates BSD rm's complaint about empty-string paths.
-trap 'rm -f "${HEADERS_FILE}" "${TEMP_MD}" 2>/dev/null || true' EXIT
+trap 'rm -f "${HEADERS_FILE}" "${TEMP_MD}" "${SECTION_TMP}" 2>/dev/null || true' EXIT
 
 # Set up git diff flags
 DIFF_FLAGS=""
@@ -78,12 +86,22 @@ if [[ "${PLUGIN_INCLUDE_SUBMODULES:-false}" =~ ^(true|on|1)$ ]]; then
 fi
 
 if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
-
     # BUILDKITE_BRANCH is always set in real Buildkite jobs; guard for local/synthetic runs
     # so the hook fails loudly rather than sending `branch=` (which Buildkite may treat as
     # no filter, silently diffing against an unrelated branch's commit).
     if [ -z "${BUILDKITE_BRANCH:-}" ]; then
         buildkite-agent annotate "compare_previous_build requires BUILDKITE_BRANCH to be set" \
+            --context "${PLUGIN_CONTEXT}" \
+            --style "error" \
+            --append
+        exit 1
+    fi
+
+    # BUILDKITE_BUILD_NUMBER is always set (as an integer) in real Buildkite jobs; guard for
+    # local/synthetic runs so the hook fails loudly instead of letting a non-numeric value
+    # crash `jq --argjson` below with a raw, unannotated error.
+    if ! [[ "${BUILDKITE_BUILD_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+        buildkite-agent annotate "compare_previous_build requires BUILDKITE_BUILD_NUMBER to be set to an integer" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
             --append
@@ -108,16 +126,16 @@ if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
         --data-urlencode "exclude_jobs=true"
     )
     # Rails-style multi-value filter: state[]=passed[&state[]=failed]
-    for state in "${COMPARE_BUILD_STATES[@]}"; do
-        CURL_ARGS+=(--data-urlencode "state[]=${state}")
-    done        
+    for STATE in "${COMPARE_BUILD_STATES[@]}"; do
+        CURL_ARGS+=(--data-urlencode "state[]=${STATE}")
+    done
 
     # Fetch with up to one retry on 429. Captures body and HTTP status in one call;
     # dumps response headers so we can honour Retry-After / RateLimit-Reset.
     HEADERS_FILE=$(mktemp)
     HTTP_STATUS=""
     API_RESPONSE=""
-    for attempt in 1 2; do
+    for ATTEMPT in 1 2; do
         curl_out=$(curl "${CURL_ARGS[@]}" \
             -D "${HEADERS_FILE}" \
             -w '\n%{http_code}' \
@@ -125,7 +143,7 @@ if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
         HTTP_STATUS="${curl_out##*$'\n'}"
         API_RESPONSE="${curl_out%$'\n'*}"
         [ "${HTTP_STATUS}" != "429" ] && break
-        [ "${attempt}" = "2" ] && break
+        [ "${ATTEMPT}" = "2" ] && break
         retry_after=$(grep -iE '^(retry-after|ratelimit-reset):' "${HEADERS_FILE}" | head -1 | awk '{print $2}' | tr -d '\r\n')
         [[ "${retry_after}" =~ ^[0-9]+$ ]] || retry_after=2
         echo "Rate limited by Buildkite API; retrying in ${retry_after}s..."
@@ -236,7 +254,6 @@ fi
 
 # Create temporary markdown file
 TEMP_MD=$(mktemp)
-trap 'rm -f "${TEMP_MD}"' EXIT
 
 if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
     # Add header
@@ -278,7 +295,6 @@ if [[ "${PLUGIN_FORMAT}" == "markdown" ]]; then
     TRUNCATED=false
     OMITTED_FILES=()
     SECTION_TMP=$(mktemp)
-    trap 'rm -f "${TEMP_MD}" "${SECTION_TMP}"' EXIT
 
     for FILE in ${FILES_CHANGED}; do
         if [[ "${TRUNCATED}" == true ]]; then

@@ -222,6 +222,54 @@ teardown() {
   assert_output --partial "Error: BUILDKITE_API_TOKEN is required when compare_previous_build is enabled"
 }
 
+@test "Fails with error annotation when compare_previous_build is true but BUILDKITE_BRANCH is unset" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_API_TOKEN="fake-token"
+  unset BUILDKITE_BRANCH
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'compare_previous_build requires BUILDKITE_BRANCH to be set'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "compare_previous_build requires BUILDKITE_BRANCH to be set"
+
+  unstub buildkite-agent
+}
+
+@test "Fails with error annotation when compare_previous_build is true but BUILDKITE_BUILD_NUMBER is not an integer" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_BUILD_NUMBER="not-a-number"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'BUILDKITE_BUILD_NUMBER requires an integer'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "BUILDKITE_BUILD_NUMBER requires an integer"
+
+  unstub buildkite-agent
+}
+
+@test "Fails with error annotation when compare_previous_build is true but BUILDKITE_BUILD_NUMBER is unset" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_API_TOKEN="fake-token"
+  unset BUILDKITE_BUILD_NUMBER
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'BUILDKITE_BUILD_NUMBER requires an integer'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "BUILDKITE_BUILD_NUMBER requires an integer"
+
+  unstub buildkite-agent
+}
+
 @test "Truncates diff and lists omitted files within the body cap" {
   # Cap is small enough that the second file won't fit, but the omitted-files
   # list and warning preamble still have room.
@@ -481,6 +529,62 @@ teardown() {
   unstub buildkite-agent
 }
 
+@test "Fails with error annotation when compare_previous_build is 'on' (alias no longer supported)" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="on"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "Invalid compare_previous_build value"
+
+  unstub buildkite-agent
+}
+
+@test "Fails with error annotation when compare_previous_build is 'off' (alias no longer supported)" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="off"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "Invalid compare_previous_build value"
+
+  unstub buildkite-agent
+}
+
+@test "Fails with error annotation when compare_previous_build is '1' (alias no longer supported)" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="1"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "Invalid compare_previous_build value"
+
+  unstub buildkite-agent
+}
+
+@test "Fails with error annotation when compare_previous_build is '0' (alias no longer supported)" {
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="0"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "Invalid compare_previous_build value"
+
+  unstub buildkite-agent
+}
+
 @test "Accepts uppercase 'PASSED_OR_FAILED' via case-insensitive match" {
   function curl() {
     echo "CURL_ARGS: $*" >&2
@@ -527,6 +631,79 @@ teardown() {
   assert_output --partial "state[]=failed"
 
   unstub buildkite-agent
+}
+
+@test "Accepts 'true' with stray surrounding whitespace" {
+  function curl() {
+    echo "CURL_ARGS: $*" >&2
+    return 1
+  }
+  export -f curl
+
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="  true  "
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "state[]=passed"
+  refute_output --partial "state[]=failed"
+  refute_output --partial "Invalid"
+
+  unstub buildkite-agent
+}
+
+@test "Full annotation flow succeeds end-to-end with compare_previous_build=true" {
+  function curl() {
+    local headers_file=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -D) headers_file="$2"; shift 2 ;;
+        *)  shift ;;
+      esac
+    done
+    [ -n "$headers_file" ] && : > "$headers_file"
+    printf '[{"number":100,"commit":"previous-sha"}]\n200'
+    return 0
+  }
+  export -f curl
+
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="true"
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  stub mktemp \
+    "echo '${BATS_TMPDIR}/headers.txt'" \
+    "echo '${BATS_TMPDIR}/diff.md'" \
+    "echo '${BATS_TMPDIR}/section.md'"
+  touch "${BATS_TMPDIR}/diff.md"
+
+  stub git \
+    "cat-file -e previous-sha^{commit} : exit 0" \
+    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
+    "diff --name-only previous-sha current-sha : echo 'file.txt'" \
+    "diff --numstat previous-sha current-sha : echo '1  2  file.txt'" \
+    "diff previous-sha current-sha -- file.txt : echo 'diff output for file.txt'"
+
+  stub buildkite-agent "annotate --context '*' --style 'info' --append : cat > '${BATS_TMPDIR}/body.out'; echo Annotation created"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_success
+  assert_output --partial "Annotation created"
+
+  run cat "${BATS_TMPDIR}/body.out"
+  assert_output --partial "Comparing changes between previous build (previous) and current build (current-)"
+
+  unstub git
+  unstub buildkite-agent
+  unstub mktemp
 }
 
 @test "Full annotation flow succeeds end-to-end with compare_previous_build=passed_or_failed" {

@@ -58,7 +58,10 @@ Whether to compare a build to the previous build. You'll need to provide an API 
 Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
 - `true`: Shows changes between the last two successful builds on the current branch
 - `false`: Does not compare a build to the previous build
-- `passed_or_failed`: Shows changes between the last two builds on the current branch that either passed or failed. Blocked or canceled builds are excluded since their commit SHA may not represent a meaningful code change to diff against.
+- `passed_or_failed`: Shows changes between the last two builds on the current branch that either passed or failed. Blocked or canceled builds are excluded because the underlying API query only requests `passed` and `failed` builds.
+
+> [!NOTE]
+> Only `true`, `false`, and `passed_or_failed` are accepted (case-insensitive) as of `v2.0.0`. Boolean-like aliases such as `on`, `off`, `1`, or `0` aren't supported — see [Changelog](#changelog). Any other value fails the step with an error annotation.
 
 Default: `false`
 
@@ -97,6 +100,14 @@ steps:
           compare_previous_build: true
 ```
 
+### Compare a build to the previous passed or failed build:
+```yaml
+steps:
+  - plugins:
+      - annotate-git-diff#v2.0.0:
+          compare_previous_build: passed_or_failed
+```
+
 ### Raw diff format:
 ```yaml
 steps:
@@ -104,6 +115,13 @@ steps:
       - annotate-git-diff#v2.0.0:
           format: "diff"
 ```
+
+## Changelog
+
+### v2.0.0
+
+- **Breaking:** `compare_previous_build` now scopes the lookup to the current branch (`BUILDKITE_BRANCH`) by default. Previously it compared against the most recent passed build on the pipeline regardless of branch; it now compares against the most recent matching build on the *same* branch. `BUILDKITE_BRANCH` is required to be set when `compare_previous_build` is enabled.
+- **Breaking:** `compare_previous_build` only accepts `true`, `false`, and `passed_or_failed` (case-insensitive). Alias values such as `on`, `off`, `1`, or `0` aren't supported — passing one of these fails the step with an error annotation rather than being treated as enabled/disabled.
 
 ## Development
 
