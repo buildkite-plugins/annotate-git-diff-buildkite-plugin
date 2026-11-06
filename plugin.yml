@@ -26,7 +26,10 @@ configuration:
       type: boolean
       default: false
     compare_previous_build:
-      type: boolean
+      oneOf:
+      - type: boolean
+      - type: string
+        enum: ["passed_or_failed"]
       default: false
     max_body_bytes:
       type: integer

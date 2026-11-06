@@ -10,14 +10,14 @@ Add the following to your `pipeline.yml`:
 steps:
   - command: echo "Running with git diff..."
     plugins:
-      - annotate-git-diff#v1.2.0:
+      - annotate-git-diff#v2.0.0:
           context: "my-diff"               # optional
           format: "markdown"               # optional (markdown|diff)
           compare_branch: "main"           # optional (defaults to comparing against previous commit)
           compare_commits: 3               # optional (compare against 3 commits back, ignored if compare_branch is set)
           include_merge_base: true         # optional (defaults to true)
           include_submodules: false        # optional (defaults to false)
-          compare_previous_build: false    # optional (defaults to false)
+          compare_previous_build: false    # optional (true|false|passed_or_failed, defaults to false)
 ```
 
 ## Configuration
@@ -56,8 +56,10 @@ Maximum size in bytes of the complete annotation body sent to `buildkite-agent a
 
 Whether to compare a build to the previous build. You'll need to provide an API Access Token with `read_builds` permissions to run this check.
 Only use this check as a standalone check, make sure to set other checks to `false` if you want to use the `compare_previous_build` check.
-- `true`: Shows changes between the last two successful builds on the pipeline
+- `true`: Shows changes between the last two successful builds on the current branch
 - `false`: Does not compare a build to the previous build
+- `passed_or_failed`: Shows changes between the last two builds on the current branch that either passed or failed. Blocked or canceled builds are excluded since their commit SHA may not represent a meaningful code change to diff against.
+
 Default: `false`
 
 ## Usage Examples
@@ -66,7 +68,7 @@ Default: `false`
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.2.0:
+      - annotate-git-diff#v2.0.0:
           compare_branch: "main"
 ```
 
@@ -74,7 +76,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.2.0:
+      - annotate-git-diff#v2.0.0:
           compare_commits: 3  # Shows changes in last 3 commits
 ```
 
@@ -82,7 +84,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.2.0:
+      - annotate-git-diff#v2.0.0:
           compare_branch: "main"
           include_submodules: true
 ```
@@ -91,7 +93,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.2.0:
+      - annotate-git-diff#v2.0.0:
           compare_previous_build: true
 ```
 
@@ -99,7 +101,7 @@ steps:
 ```yaml
 steps:
   - plugins:
-      - annotate-git-diff#v1.2.0:
+      - annotate-git-diff#v2.0.0:
           format: "diff"
 ```
 
