@@ -14,9 +14,10 @@ PLUGIN_INCLUDE_SUBMODULES=$(plugin_read_config "INCLUDE_SUBMODULES" "false")
 PLUGIN_COMPARE_PREVIOUS_BUILD=$(plugin_read_config "COMPARE_PREVIOUS_BUILD" "false")
 
 # Lowercase via `tr` for Bash 3.2 compatibility (macOS). ${var,,} needs Bash 4+.
-# `read` then trims leading/trailing whitespace so a stray space doesn't fall
-# through to the invalid-value branch below.
-COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | tr '[:upper:]' '[:lower:]')
+# `tr -d '\r\n'` strips any stray CR/LF (e.g. from a CRLF-sourced config value)
+# before `read` trims leading/trailing whitespace, so neither falls through to
+# the invalid-value branch below. Extra check is needed in case  plugin is ran with --no-plugin-validation
+COMPARE_PREVIOUS_BUILD_LOWER=$(echo "${PLUGIN_COMPARE_PREVIOUS_BUILD}" | tr -d '\r\n' | tr '[:upper:]' '[:lower:]')
 read -r COMPARE_PREVIOUS_BUILD_LOWER <<< "${COMPARE_PREVIOUS_BUILD_LOWER}"
 
 # Normalize: true keeps the pre-existing state=passed behaviour;

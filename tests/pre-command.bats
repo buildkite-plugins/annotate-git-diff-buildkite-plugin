@@ -658,6 +658,31 @@ teardown() {
   unstub buildkite-agent
 }
 
+@test "Accepts 'true' with a trailing CRLF" {
+  function curl() {
+    echo "CURL_ARGS: $*" >&2
+    return 1
+  }
+  export -f curl
+
+  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="$(printf 'true\r\n')"
+  export BUILDKITE_API_TOKEN="fake-token"
+  export BUILDKITE_ORGANIZATION_SLUG="test-org"
+  export BUILDKITE_PIPELINE_SLUG="test-pipeline"
+
+  stub buildkite-agent \
+    "annotate * --context * --style 'error' --append : echo 'Failed to fetch build information'"
+
+  run "$PWD"/hooks/pre-command
+
+  assert_failure
+  assert_output --partial "state[]=passed"
+  refute_output --partial "state[]=failed"
+  refute_output --partial "Invalid"
+
+  unstub buildkite-agent
+}
+
 @test "Full annotation flow succeeds end-to-end with compare_previous_build=true" {
   function curl() {
     local headers_file=""
