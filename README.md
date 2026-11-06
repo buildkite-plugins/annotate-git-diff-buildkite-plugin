@@ -61,7 +61,7 @@ Only use this check as a standalone check, make sure to set other checks to `fal
 - `passed_or_failed`: Shows changes between the last two builds on the current branch that either passed or failed. Blocked or canceled builds are excluded because the underlying API query only requests `passed` and `failed` builds.
 
 > [!NOTE]
-> Only `true`, `false`, and `passed_or_failed` are accepted (case-insensitive) as of `v2.0.0`. Boolean-like aliases such as `on`, `off`, `1`, or `0` aren't supported — see [Changelog](#changelog). Any other value fails the step with an error annotation.
+> Only `true`, `false`, and `passed_or_failed` are accepted as of `v2.0.0`. Boolean-like aliases such as `on`, `off`, `1`, or `0` aren't supported — see [Changelog](#changelog). Any other value fails the step with an error annotation. (Case-insensitive matching only applies when run with `--no-plugin-validation`; normal pipeline validation requires the exact lowercase string.)
 
 Default: `false`
 
@@ -121,7 +121,7 @@ steps:
 ### v2.0.0
 
 - **Breaking:** `compare_previous_build` now scopes the lookup to the current branch (`BUILDKITE_BRANCH`) by default. Previously it compared against the most recent passed build on the pipeline regardless of branch; it now compares against the most recent matching build on the *same* branch. `BUILDKITE_BRANCH` is required to be set when `compare_previous_build` is enabled.
-- **Breaking:** `compare_previous_build` only accepts `true`, `false`, and `passed_or_failed` (case-insensitive). Alias values such as `on`, `off`, `1`, or `0` aren't supported — passing one of these fails the step with an error annotation rather than being treated as enabled/disabled.
+- **Breaking:** `compare_previous_build` only accepts `true`, `false`, and `passed_or_failed` (the hook matches case-insensitively, but under normal pipeline validation `plugin.yml` only allows the exact lowercase string — case-insensitive matching only takes effect with `--no-plugin-validation`). Alias values such as `on`, `off`, `1`, or `0` aren't supported — passing one of these fails the step with an error annotation rather than being treated as enabled/disabled.
 
 ## Development
 
