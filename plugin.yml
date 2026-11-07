@@ -25,8 +25,13 @@ configuration:
     include_submodules:
       type: boolean
       default: false
+    # Narrower than hooks/pre-command on purpose: the hook's extra tolerance (lowercasing,
+    # quoted "true"/"false") only matters for config that reaches it unvalidated.
     compare_previous_build:
-      type: boolean
+      oneOf:
+      - type: boolean
+      - type: string
+        enum: ["passed_or_failed"]
       default: false
     max_body_bytes:
       type: integer
