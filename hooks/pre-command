@@ -162,18 +162,8 @@ if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
         exit 1
     fi
 
-    # Validate the basic JSON structure
-    if [[ -n $(jq -re '""' <<< "${API_RESPONSE}" 2>&1) ]]; then
-        buildkite-agent annotate "Invalid JSON response format" \
-            --context "${PLUGIN_CONTEXT}" \
-            --style "error" \
-            --append
-        exit 1
-    fi
-
-    # Defensive against unexpected 200 bodies (e.g. {"message": "..."}) so we surface a
-    # clearer error than "No previous build found" on an object response.
-    if [ "$(jq -r 'type' <<< "${API_RESPONSE}")" != "array" ]; then
+    # Validate that response must be an "array" type
+    if [ "${API_RESPONSE_TYPE}" != "array" ]; then
         buildkite-agent annotate "Unexpected Buildkite API response shape (expected array of builds)" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \

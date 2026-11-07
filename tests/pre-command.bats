@@ -529,60 +529,20 @@ teardown() {
   unstub buildkite-agent
 }
 
-@test "Fails with error annotation when compare_previous_build is 'on' (alias no longer supported)" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="on"
+@test "Fails with error annotation when compare_previous_build is a no-longer-supported alias" {
+  for value in on off 1 0; do
+    export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="${value}"
 
-  stub buildkite-agent \
-    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
+    stub buildkite-agent \
+      "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
 
-  run "$PWD"/hooks/pre-command
+    run "$PWD"/hooks/pre-command
 
-  assert_failure
-  assert_output --partial "Invalid compare_previous_build value"
+    assert_failure
+    assert_output --partial "Invalid compare_previous_build value"
 
-  unstub buildkite-agent
-}
-
-@test "Fails with error annotation when compare_previous_build is 'off' (alias no longer supported)" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="off"
-
-  stub buildkite-agent \
-    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
-
-  run "$PWD"/hooks/pre-command
-
-  assert_failure
-  assert_output --partial "Invalid compare_previous_build value"
-
-  unstub buildkite-agent
-}
-
-@test "Fails with error annotation when compare_previous_build is '1' (alias no longer supported)" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="1"
-
-  stub buildkite-agent \
-    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
-
-  run "$PWD"/hooks/pre-command
-
-  assert_failure
-  assert_output --partial "Invalid compare_previous_build value"
-
-  unstub buildkite-agent
-}
-
-@test "Fails with error annotation when compare_previous_build is '0' (alias no longer supported)" {
-  export BUILDKITE_PLUGIN_ANNOTATE_GIT_DIFF_COMPARE_PREVIOUS_BUILD="0"
-
-  stub buildkite-agent \
-    "annotate * --context * --style 'error' --append : echo 'Invalid compare_previous_build value'"
-
-  run "$PWD"/hooks/pre-command
-
-  assert_failure
-  assert_output --partial "Invalid compare_previous_build value"
-
-  unstub buildkite-agent
+    unstub buildkite-agent
+  done
 }
 
 @test "Accepts uppercase 'PASSED_OR_FAILED' via case-insensitive match" {
