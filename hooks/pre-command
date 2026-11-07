@@ -163,7 +163,7 @@ if [[ "${COMPARE_BUILD_ENABLED}" == "true" ]]; then
     fi
 
     # Validate that response must be an "array" type
-    if [ "${API_RESPONSE_TYPE}" != "array" ]; then
+    if ! jq -e 'type == "array"' >/dev/null 2>&1 <<< "${API_RESPONSE}"; then
         buildkite-agent annotate "Unexpected Buildkite API response shape (expected array of builds)" \
             --context "${PLUGIN_CONTEXT}" \
             --style "error" \
