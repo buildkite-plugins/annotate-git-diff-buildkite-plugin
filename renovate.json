@@ -1,6 +1,7 @@
 {
   "extends": [
     "config:base",
-    ":disableDependencyDashboard"
+    ":disableDependencyDashboard",
+    "github>buildkite-plugins/renovate-config:automerge-buildkite"
   ]
 }
